@@ -3,265 +3,187 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>CSV Donation Counter (BNB / $)</title>
+<title>BNB Donations — Auto CSV</title>
 <style>
-  :root{--bg:#0a0b0e;--text:#e8eef7;--muted:#9aa3b2;--accent:#f3ba2f}
-  html,body{height:100%;margin:0;font-family:Inter,system-ui,-apple-system,Segoe UI,Roboto,Arial;background:#04050a;color:var(--text);display:flex;align-items:center;justify-content:center}
-  .wrap{width:100%;max-width:980px;padding:28px;text-align:center}
-  h1{margin:0 0 8px;color:var(--muted);font-weight:600;font-size:16px}
-  .amount{font-size:clamp(36px,10vw,120px);font-weight:800;color:var(--accent);line-height:1}
-  .meta{margin-top:6px;color:var(--muted);font-size:13px}
+  :root{--bg:#04050a;--text:#e8eef7;--muted:#9aa3b2;--accent:#f3ba2f}
+  html,body{height:100%;margin:0;font-family:Inter,system-ui,-apple-system,Segoe UI,Roboto,Arial;background:linear-gradient(180deg,#070812,#02030a);color:var(--text);display:flex;align-items:center;justify-content:center}
+  .wrap{max-width:980px;padding:28px;text-align:center}
+  h1{margin:0 0 8px;color:var(--muted);font-weight:600;font-size:18px}
+  .amount{font-size:clamp(48px,12vw,120px);font-weight:800;color:var(--accent);line-height:1}
+  .meta{margin-top:8px;color:var(--muted);font-size:13px}
   .controls{margin-top:18px;display:flex;gap:10px;justify-content:center;flex-wrap:wrap}
   input[type="file"]{display:none}
   .btn{background:#0f1420;border:1px solid #233048;color:#eaf1ff;padding:10px 14px;border-radius:10px;cursor:pointer}
   .small{font-size:12px;color:var(--muted)}
   .error{color:#ff8a8a;margin-top:10px}
-  .list{margin-top:14px;max-height:220px;overflow:auto;background:#07101a;padding:8px;border-radius:8px;border:1px dashed #1f2a3a;text-align:left;font-family:ui-monospace,monospace;color:#dfe9ff}
-  a.link{color:#cfe3ff}
 </style>
 </head>
 <body>
   <div class="wrap">
-    <h1>CSV Donation Counter — shows total (and total ÷ 2)</h1>
+    <h1>BNB Donations Total</h1>
     <div id="amount" class="amount">0 BNB</div>
-    <div id="meta" class="meta">Upload CSV or point to a CSV URL with <code>?csv_url=</code></div>
+    <div id="meta" class="meta">No data yet — upload a CSV or provide <code>?csv_url=</code></div>
 
-    <div class="controls" role="group" aria-label="controls">
-      <label class="btn">
-        Upload CSV
-        <input id="file" type="file" accept=".csv,text/csv" />
-      </label>
-
-      <button class="btn" id="btnFetchUrl">Fetch CSV URL</button>
-
-      <button class="btn" id="btnDownload">Download Matched Rows</button>
+    <div class="controls" aria-hidden>
+      <label class="btn">Upload CSV<input id="csv" type="file" accept=".csv" /></label>
+      <button class="btn" id="btnFetch">Fetch CSV URL</button>
     </div>
 
-    <div class="small" style="margin-top:10px">
-      Mode: <span id="mode">currency=bnb</span> · Filters: <span id="filterinfo">none</span>
-      <div style="margin-top:6px" class="small muted">Usage examples:
-        <a class="link" href="?csv_url=https://backdoor.example/txs.csv&currency=bnb&from=0xbf31...9179&to=0x2881...9307" target="_blank">?csv_url=...&currency=bnb&from=...&to=...</a>
-      </div>
-    </div>
-
-    <div id="err" class="error" role="alert" style="display:none"></div>
-
-    <div id="rows" class="list" aria-live="polite"></div>
+    <div id="err" class="error" style="display:none"></div>
   </div>
 
 <script>
-/*
-  CSV Donation Counter (single-file)
-  - Defaults: currency=bnb
-  - Optional query params:
-      csv_url=URL to CSV (the page will fetch this)
-      currency=bnb | dollar
-      from=0x... (optional address filter for sender)
-      to=0x...   (optional address filter for receiver)
-      divide=1|2 (display divider; default 1)
-  - If /api/proxy exists on the same domain, the page will fetch csv_url via /api/proxy?url=...
+/* Minimal, robust CSV-only UI. Auto-fetches csv_url ?csv_url=... on load.
+   Query params:
+     csv_url= (public URL to CSV) — e.g. https://czfund.vercel.app/files/txs.csv
+     currency=bnb|dollar (default bnb)
+     from=0x... (optional)
+     to=0x...   (optional)
+     divide=1|2 (display divider)
 */
 
-const $ = id => document.getElementById(id);
-const fileInput = $('file'), btnFetchUrl = $('btnFetchUrl'), btnDownload = $('btnDownload');
-const amountEl = $('amount'), metaEl = $('meta'), errEl = $('err'), rowsEl = $('rows');
-const modeEl = $('mode'), filterEl = $('filterinfo');
+const elAmount = document.getElementById('amount');
+const elMeta = document.getElementById('meta');
+const elErr = document.getElementById('err');
+const fileInput = document.getElementById('csv');
+const btnFetch = document.getElementById('btnFetch');
 
 const qs = new URLSearchParams(location.search);
-const csvUrl = qs.get('csv_url') || '';
-const currency = (qs.get('currency') || 'bnb').toLowerCase(); // bnb or dollar
-const FROM = (qs.get('from') || '').toLowerCase();
-const TO   = (qs.get('to') || '').toLowerCase();
+const CSV_URL = qs.get('csv_url') || '';
+const CURRENCY = (qs.get('currency') || 'bnb').toLowerCase();
+const FILTER_FROM = (qs.get('from') || '').toLowerCase();
+const FILTER_TO   = (qs.get('to')   || '').toLowerCase();
 const DIVIDE = Number(qs.get('divide') || 1);
 
-modeEl.textContent = `currency=${currency}`;
-filterEl.textContent = (FROM || TO) ? `from=${FROM||'*'} to=${TO||'*'}` : 'none';
-
-function showError(msg){ errEl.style.display='block'; errEl.textContent = msg; }
-function clearError(){ errEl.style.display='none'; errEl.textContent=''; }
+function showError(msg){ elErr.style.display='block'; elErr.textContent=msg; }
+function clearError(){ elErr.style.display='none'; elErr.textContent=''; }
 
 function parseCSV(text){
-  // Basic CSV parser tolerant of commas inside quotes.
-  // Returns array of rows (objects) and array of header names.
-  const lines = [];
+  // Simple CSV parser tolerant to quoted commas
+  const rows = [];
   let cur = '', inQ=false, row=[];
-  for(let i=0;i<text.length;i++){
-    const ch = text[i];
-    if(ch === '"' ) { inQ = !inQ; cur += ch; continue; }
-    if(ch === ',' && !inQ){ row.push(cur.trim()); cur=''; continue; }
-    if((ch === '\n' || ch === '\r') && !inQ){
-      if(cur !== '' || row.length>0){ row.push(cur.trim()); lines.push(row); row=[]; cur=''; }
-      // skip extra \r or \n
-      while(i+1<text.length && (text[i+1]==='\n' || text[i+1]==='\r')) i++;
+  for (let i=0;i<text.length;i++){
+    const ch=text[i];
+    if (ch==='\"') { inQ=!inQ; cur+=ch; continue; }
+    if (ch===',' && !inQ){ row.push(cur.trim()); cur=''; continue; }
+    if ((ch==='\n' || ch==='\r') && !inQ){
+      if (cur!=='' || row.length>0){ row.push(cur.trim()); rows.push(row); row=[]; cur=''; }
+      while (i+1<text.length && (text[i+1]==='\n' || text[i+1]==='\r')) i++;
       continue;
     }
-    cur += ch;
+    cur+=ch;
   }
-  if(cur !== '' || row.length>0){ row.push(cur.trim()); lines.push(row); }
-  if(lines.length===0) return { headers:[], rows:[] };
-  const headers = lines[0].map(h=>h.replace(/^"|"$/g,'').trim());
-  const data = lines.slice(1).map(r=>{
-    const obj = {};
-    for(let i=0;i<headers.length;i++){
-      obj[headers[i]] = (r[i]||'').replace(/^"|"$/g,'').trim();
-    }
-    return obj;
+  if (cur!=='' || row.length>0){ row.push(cur.trim()); rows.push(row); }
+  if (rows.length===0) return {headers:[],rows:[]};
+  const headers = rows[0].map(h=>h.replace(/^"|"$/g,'').trim());
+  const data = rows.slice(1).map(r=>{
+    const o={};
+    for (let i=0;i<headers.length;i++) o[headers[i]] = (r[i]||'').replace(/^"|"$/g,'').trim();
+    return o;
   });
   return { headers, rows: data };
 }
 
-function extractValueFromRow(obj){
-  // Look for typical fields: value, amount, token, tokenValue, etc.
-  // - If currency=bnb: look for 'value' numeric or pattern '12.34 BNB' in any cell
-  // - If currency=dollar: look for $... patterns
-  // Returns numeric amount (float) or 0
+function extractBNBFromRow(obj){
+  // look for common numeric fields first
   const rowText = Object.values(obj).join(' ');
-  if(currency === 'bnb'){
-    // Try explicit numeric columns first
-    const candidates = ['value','amount','bnb','tokenValue','quantity'];
-    for(const c of candidates){
-      if(obj[c] && obj[c].length && !isNaN(Number(obj[c]))){
-        return Number(obj[c]);
-      }
+  const candidates = ['value','amount','bnb','tokenValue','quantity'];
+  for (const c of candidates){
+    if (obj[c] && obj[c].length && !isNaN(Number(obj[c]))){
+      return Number(obj[c]);
     }
-    // Try pattern like "12.34 BNB" or "BNB 12.34" or "12.34"
-    const re = /([0-9]+(?:\.[0-9]+)?)\s*BNB/ig;
-    const m = rowText.match(re);
-    if(m && m.length){
-      // sum matches in row if multiple
-      return m.reduce((s,t)=> s + Number(t.replace(/[^0-9.]/g,'')), 0);
-    }
-    // fallback: try any bare number in columns that look like value
-    const numRe = /([0-9]+\.[0-9]+)/g;
-    const found = rowText.match(numRe);
-    if(found && found.length) return Number(found[found.length-1]); // last number often value
-    return 0;
-  } else {
-    // dollar mode
-    const re = /\$[0-9,]+(?:\.[0-9]+)?/g;
-    const m = rowText.match(re);
-    if(!m) return 0;
-    return m.reduce((s,t)=> s + parseFloat(t.replace(/[$,]/g,'')), 0);
   }
+  // match "12.34 BNB"
+  const re = /([0-9]+(?:\.[0-9]+)?)\s*BNB/ig;
+  let m, sum=0, found=false;
+  while ((m=re.exec(rowText))!==null){ sum+=Number(m[1]); found=true; }
+  if(found) return sum;
+  // try bare decimal numeric fallback (last number typically value)
+  const numRe = /([0-9]+\.[0-9]+)/g;
+  const arr = rowText.match(numRe);
+  if(arr && arr.length) return Number(arr[arr.length-1]);
+  return 0;
+}
+
+function extractDollarFromRow(obj){
+  const rowText = Object.values(obj).join(' ');
+  const re = /\$[0-9,]+(?:\.[0-9]+)?/g;
+  const m = rowText.match(re);
+  if(!m) return 0;
+  return m.reduce((s,t)=> s + parseFloat(t.replace(/[$,]/g,'')), 0);
 }
 
 function rowMatchesFilter(obj){
-  if(!FROM && !TO) return true;
-  // Accept common header names for addresses: from,to,fromAddress,toAddress,sender,receiver
-  const addrCandidates = key => {
-    const keys = Object.keys(obj).map(k=>k.toLowerCase());
-    const mapping = {
-      from: keys.find(k=>/from/.test(k)),
-      to:   keys.find(k=>/to/.test(k))
-    };
-    return mapping[key];
-  };
-  // find values
-  const fromKey = addrCandidates('from');
-  const toKey   = addrCandidates('to');
-  if(fromKey && FROM){
-    if((obj[fromKey]||'').toLowerCase() !== FROM) return false;
-  }
-  if(toKey && TO){
-    if((obj[toKey]||'').toLowerCase() !== TO) return false;
-  }
-  // If CSV doesn't include addresses, still allow everything (can't filter)
+  if(!FILTER_FROM && !FILTER_TO) return true;
+  const lowerKeys = Object.keys(obj).reduce((acc,k)=>{ acc[k.toLowerCase()]=k; return acc; },{});
+  const findKey = name => Object.keys(lowerKeys).find(k=>k.includes(name));
+  const fromKey = findKey('from') || findKey('sender') || null;
+  const toKey   = findKey('to')   || findKey('receiver') || null;
+  if(fromKey && FILTER_FROM && (obj[fromKey]||'').toLowerCase() !== FILTER_FROM) return false;
+  if(toKey   && FILTER_TO   && (obj[toKey]  ||'').toLowerCase() !== FILTER_TO) return false;
   return true;
 }
 
-function renderResults(total, matchedRows){
-  const displayTotal = (total / (DIVIDE||1));
-  const unit = (currency==='bnb') ? 'BNB' : '$';
-  amountEl.textContent = `${displayTotal.toLocaleString(undefined,{maximumFractionDigits:8})} ${unit}`;
-  metaEl.textContent = `Found ${matchedRows.length} matching rows · Raw total: ${total.toLocaleString(undefined,{maximumFractionDigits:8})} ${unit}${DIVIDE&&DIVIDE!==1?(' · ÷ '+DIVIDE):''}`;
-  rowsEl.innerHTML = matchedRows.slice(0,200).map(r=>JSON.stringify(r)).join('<br>');
+function renderResult(total, matchedCount){
+  const displayed = total / (DIVIDE || 1);
+  const unit = (CURRENCY==='bnb') ? 'BNB' : '$';
+  elAmount.textContent = `${displayed.toLocaleString(undefined,{maximumFractionDigits:8})} ${unit}`;
+  elMeta.textContent = `Matched rows: ${matchedCount} · Raw total: ${total.toLocaleString(undefined,{maximumFractionDigits:8})} ${unit}${DIVIDE&&DIVIDE!==1?(' · ÷ '+DIVIDE):''}`;
   clearError();
 }
 
 async function processCSVText(text){
   try{
-    const { headers, rows } = parseCSV(text);
-    // iterate rows, filter, extract amounts
-    let total = 0;
-    const matched = [];
-    for(const r of rows){
-      if(!rowMatchesFilter(r)) continue;
-      const val = extractValueFromRow(r);
-      if(val > 0){
-        total += val;
-        matched.push(r);
-      }
+    const {headers, rows} = parseCSV(text);
+    let total=0, matched=0;
+    for (const r of rows){
+      if (!rowMatchesFilter(r)) continue;
+      const val = (CURRENCY==='bnb') ? extractBNBFromRow(r) : extractDollarFromRow(r);
+      if (val>0){ total+=val; matched++; }
     }
-    renderResults(total, matched);
-    return { total, matched };
+    renderResult(total, matched);
   }catch(e){
-    showError('CSV parse error: ' + (e.message||e));
+    showError('CSV parse error: '+ (e.message||e));
   }
 }
 
-async function fetchCsvViaProxy(url){
-  // If /api/proxy exists on same domain, use it to avoid CORS
-  try {
-    const p = '/api/proxy?url=' + encodeURIComponent(url);
-    const r = await fetch(p);
-    if(r.ok) return await r.text();
-    // else fallback to remote proxy (jina)
-    const fallback = 'https://r.jina.ai/http/' + encodeURIComponent(url);
-    const rf = await fetch(fallback);
-    if(rf.ok) return await rf.text();
-    throw new Error('Fetch failed: ' + r.status);
-  } catch(e){
-    // try direct (may fail due to CORS)
-    const rd = await fetch(url).then(r=>r.text()).catch(()=>{ throw e; });
-    return rd;
-  }
+async function fetchCsvText(url){
+  // if URL is on same domain /api/proxy pattern not needed; rely on public S3 or backdoor endpoint
+  const res = await fetch(url, { credentials: 'omit' });
+  if(!res.ok) throw new Error('fetch failed: '+res.status);
+  return await res.text();
 }
 
-// File upload event
-fileInput.addEventListener('change', async (ev) => {
-  if(!ev.target.files || ev.target.files.length===0) return;
-  const f = ev.target.files[0];
+fileInput.addEventListener('change', async (ev)=>{
+  const f = ev.target.files && ev.target.files[0];
+  if(!f) return;
   const text = await f.text();
   await processCSVText(text);
 });
 
-// Fetch remote CSV if csv_url param present
-btnFetchUrl.addEventListener('click', async ()=>{
-  if(!csvUrl) return showError('No csv_url in querystring');
-  clearError(); metaEl.textContent = 'Fetching CSV…';
+btnFetch.addEventListener('click', async ()=>{
+  if(!CSV_URL) return showError('No csv_url provided in query string');
   try{
-    const text = await fetchCsvViaProxy(csvUrl);
-    await processCSVText(text);
+    elMeta.textContent = 'Fetching CSV…';
+    const txt = await fetchCsvText(CSV_URL);
+    await processCSVText(txt);
   }catch(e){
-    showError('Fetch CSV failed: ' + (e.message||e));
+    showError('Fetch failed: '+ (e.message || e));
   }
 });
 
-// Auto-run fetch on load if csv_url provided
-(async function autoRun(){
-  if(csvUrl){
-    btnFetchUrl.textContent = 'Fetch CSV from URL';
+// auto-run if csv_url present
+(async function auto(){
+  if(CSV_URL){
     try{
-      metaEl.textContent = 'Auto-fetching CSV…';
-      const text = await fetchCsvViaProxy(csvUrl);
-      await processCSVText(text);
+      elMeta.textContent = 'Auto-fetching CSV…';
+      const txt = await fetchCsvText(CSV_URL);
+      await processCSVText(txt);
     }catch(e){
       showError('Auto-fetch failed: ' + (e.message||e));
     }
   }
 })();
-
-// Download matched rows (simple CSV of JSON rows)
-btnDownload.addEventListener('click', ()=>{
-  const content = rowsEl.textContent || '';
-  if(!content) { showError('No matched rows to download'); return; }
-  const blob = new Blob([content], { type: 'text/plain' });
-  const a = document.createElement('a');
-  a.href = URL.createObjectURL(blob);
-  a.download = 'matched_rows.txt';
-  a.click();
-});
-
 </script>
 </body>
 </html>
