@@ -2,27 +2,26 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>BNB Donation Counter – CSV Upload</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>BNB Sent – Auto A ➜ B (Etherscan V2 API)</title>
   <style>
     :root { --bg:#0a0b0e; --text:#e8eef7; --muted:#9aa3b2; --accent:#f3ba2f; }
-    *{box-sizing:border-box}
-    html,body{height:100%}
-    body{margin:0;display:flex;align-items:center;justify-content:center;background:#0a0b0e;color:var(--text);font-family:Inter,system-ui,-apple-system,Segoe UI,Roboto,Arial}
-    .wrap{width:100%;max-width:900px;padding:24px;text-align:center}
-    h1{font-size:clamp(18px,3vw,28px);margin-bottom:20px;color:var(--muted)}
+    html,body{height:100%;margin:0;display:flex;align-items:center;justify-content:center;
+      background:#0a0b0e;color:var(--text);font-family:Inter,system-ui,-apple-system,Segoe UI,Roboto,Arial}
+    .wrap{width:100%;max-width:1100px;padding:24px;text-align:center}
+    h1{font-size:18px;font-weight:600;color:var(--muted);margin:0 0 10px}
     .amt{font-weight:800;font-size:clamp(42px,12vw,120px);line-height:1.05;letter-spacing:1px;color:var(--accent)}
-    .sub{margin-top:10px;color:var(--muted);font-size:clamp(12px,1.6vw,14px)}
+    .sub{margin-top:10px;color:var(--muted);font-size:14px}
     .err{color:#ff8a8a}
-    input[type=file]{display:none}
-    .btn{display:none} /* hide upload button UI */
+    .blink{animation:blink 1s step-start 2}
+    @keyframes blink{50%{opacity:.35}}
   </style>
 </head>
 <body>
   <div class="wrap">
-    <h1>BNB Donations Total</h1>
+    <h1>BNB sent from <code id="fromA"></code> ➜ <code id="toB"></code></h1>
     <div id="amount" class="amt">0 BNB</div>
-    <div id="meta" class="sub">Waiting for CSV data…</div>
+    <div id="meta" class="sub">Waiting for data…</div>
   </div>
 
 <script>
@@ -32,7 +31,9 @@
   var elFrom = document.getElementById('fromA');
   var elTo   = document.getElementById('toB');
 
-  // Defaults: your addresses
+  const BASE = "https://api.etherscan.io/v2/api";  // Etherscan V2 base
+  const CHAIN = 56; // BSC
+
   var DEFAULT_FROM = '0xbf310C4060c5399BE02B51f07850BAFF91269179';
   var DEFAULT_TO   = '0x28816c4C4792467390C90e5B426F198570E29307';
 
@@ -44,16 +45,16 @@
   var DIVIDE    = Number(qs.get('divide')||1);
   var REFRESH   = Number(qs.get('refresh_ms')||60000);
 
-  if(elFrom) elFrom.textContent = ADDR_FROM;
-  if(elTo)   elTo.textContent   = ADDR_TO;
+  elFrom.textContent = ADDR_FROM;
+  elTo.textContent   = ADDR_TO;
 
   function formatDecimalString(decStr){
     if(!decStr.includes('.')){
-      try { return new Intl.NumberFormat().format(BigInt(decStr)) + ' BNB'; } catch(_) { return decStr + ' BNB'; }
+      try { return new Intl.NumberFormat().format(BigInt(decStr)) + ' BNB'; }
+      catch(_) { return decStr + ' BNB'; }
     }
-    var parts = decStr.split('.');
-    var head = parts[0];
-    var tail = parts[1].replace(/0+$/,'').slice(0,8);
+    var [head, tail] = decStr.split('.');
+    tail = tail.replace(/0+$/,'').slice(0,8);
     try { head = new Intl.NumberFormat().format(BigInt(head)); } catch(_) {}
     return head + (tail?'.'+tail:'') + ' BNB';
   }
@@ -68,144 +69,93 @@
   }
 
   async function fetchJSON(url){
-    try{
-      var p = '/api/proxy?url=' + encodeURIComponent(url);
-      var r = await fetch(p);
-      if(!r.ok) throw new Error('proxy '+r.status);
-      var t = await r.text();
-      return JSON.parse(t);
-    }catch(_){
-      var r2 = await fetch(url);
-      var t2 = await r2.text();
-      return JSON.parse(t2);
-    }
+    const r = await fetch(url);
+    const t = await r.text();
+    return JSON.parse(t);
   }
 
   async function getAllNormalFromA(){
-    // Pull ALL normal tx where sender is ADDR_FROM; returns {totalWeiToB, hashesFromA}
-    var page = 1; var totalWeiToB = 0n; var reqs = 0; var hitsToB = 0; var hashes = [];
-    var fromLC = ADDR_FROM.toLowerCase();
-    var toLC   = ADDR_TO.toLowerCase();
+    var page=1, totalWeiToB=0n, reqs=0, hitsToB=0, hashes=[];
+    var fromLC=ADDR_FROM.toLowerCase(), toLC=ADDR_TO.toLowerCase();
     while(true){
-      var url = 'https://api.bscscan.com/api?module=account&action=txlist&address=' + ADDR_FROM + '&startblock=0&endblock=99999999&page=' + page + '&offset=' + OFFSET + '&sort=asc&apikey=' + APIKEY;
+      var url = `${BASE}?chainid=${CHAIN}&module=account&action=txlist&address=${ADDR_FROM}&startblock=0&endblock=99999999&page=${page}&offset=${OFFSET}&sort=asc&apikey=${APIKEY}`;
       reqs++;
       var data = await fetchJSON(url);
       if(!data || !Array.isArray(data.result) || data.result.length===0) break;
-      for(var i=0;i<data.result.length;i++){
-        var tx = data.result[i];
-        if((tx.from||'').toLowerCase() !== fromLC) continue; // only txs sent by A
+      for(var tx of data.result){
+        if((tx.from||'').toLowerCase() !== fromLC) continue;
         hashes.push(tx.hash);
-        if((tx.to||'').toLowerCase() === toLC && tx.isError === '0'){
-          try{ var v = BigInt(tx.value||'0'); if(v>0n){ totalWeiToB += v; hitsToB++; } }catch(_){ }
+        if((tx.to||'').toLowerCase() === toLC && tx.isError==='0'){
+          try{ var v=BigInt(tx.value||'0'); if(v>0n){ totalWeiToB+=v; hitsToB++; } }catch(_){}
         }
       }
-      if(data.result.length < OFFSET) break;
+      if(data.result.length<OFFSET) break;
       page++; if(page>2000) break;
     }
     return { totalWeiToB, hashes, reqs, hitsToB };
   }
 
   async function sumInternalsByHashes(hashes){
-    // For each tx hash originated by A, fetch internal traces and sum those whose TO == B
-    var toLC = ADDR_TO.toLowerCase();
-    var totalWei = 0n; var hits = 0; var reqs = 0;
-    // small concurrency to respect rate limits
-    var idx = 0; var CONC = 4;
+    var toLC=ADDR_TO.toLowerCase(), totalWei=0n, hits=0, reqs=0;
+    var idx=0, CONC=3;
     async function worker(){
-      while(idx < hashes.length){
-        var my = idx++; var h = hashes[my];
-        var url = 'https://api.bscscan.com/api?module=account&action=txlistinternal&txhash=' + h + '&apikey=' + APIKEY;
+      while(idx<hashes.length){
+        var h = hashes[idx++];
+        var url = `${BASE}?chainid=${CHAIN}&module=account&action=txlistinternal&txhash=${h}&apikey=${APIKEY}`;
         reqs++;
         try{
           var data = await fetchJSON(url);
           if(data && Array.isArray(data.result)){
-            for(var j=0;j<data.result.length;j++){
-              var itx = data.result[j];
-              if((itx.to||'').toLowerCase() === toLC){
-                try{ var v = BigInt(itx.value||'0'); if(v>0n){ totalWei += v; hits++; } }catch(_){ }
+            for(var itx of data.result){
+              if((itx.to||'').toLowerCase()===toLC){
+                try{ var v=BigInt(itx.value||'0'); if(v>0n){ totalWei+=v; hits++; } }catch(_){}
               }
             }
           }
-        }catch(e){ /* ignore single-call errors */ }
-        // brief delay to be gentle
-        await new Promise(r=>setTimeout(r,120));
+        }catch(_){}
+        await new Promise(r=>setTimeout(r,120)); // delay to respect rate limit
       }
     }
-    var workers = Array.from({length:Math.min(CONC, hashes.length)}, ()=>worker());
-    await Promise.all(workers);
+    await Promise.all(Array.from({length:Math.min(CONC,hashes.length)},()=>worker()));
     return { totalWei, hits, reqs };
   }
 
   async function compute(){
     if(!APIKEY){
-      elMeta.innerHTML = '<span class="err">Missing apikey.</span> Add <code>?apikey=YOUR_BSCSCAN_KEY</code> to the URL.';
+      elMeta.innerHTML='<span class=\"err\">Missing apikey.</span> Add ?apikey=YOUR_KEY to URL.';
       return;
     }
-    elMeta.textContent = 'Fetching (phase 1/2)…';
-    var t0 = performance.now();
+    elMeta.textContent='Fetching…';
+    var t0=performance.now();
     try{
-      // Phase 1: normal tx from A (gets direct sends to B and the hash list)
-      var norm = await getAllNormalFromA();
-      // Phase 2: for those tx hashes, pull internal traces and sum ones ending at B
-      elMeta.textContent = 'Fetching (phase 2/2)…';
-      var intr = await sumInternalsByHashes(norm.hashes);
+      var norm=await getAllNormalFromA();
+      elMeta.textContent='Fetching internal…';
+      var intr=await sumInternalsByHashes(norm.hashes);
 
-      var totalWei = norm.totalWeiToB + intr.totalWei;
-      var totalBNBStr = weiToBNBString(totalWei);
+      var totalWei=norm.totalWeiToB+intr.totalWei;
+      var totalBNBStr=weiToBNBString(totalWei);
 
-      var div = DIVIDE || 1;
-      function divideDecimalString(decStr, d){
-        var parts = decStr.split('.');
-        var whole = parts[0];
-        var frac = (parts[1]||'').padEnd(18,'0').slice(0,18);
-        var wei = BigInt(whole) * 1000000000000000000n + BigInt(frac);
-        var out = wei / BigInt(d);
+      var div=DIVIDE||1;
+      function divideDecimalString(decStr,d){
+        var [whole, frac=''] = decStr.split('.');
+        frac=frac.padEnd(18,'0').slice(0,18);
+        var wei=BigInt(whole)*1000000000000000000n+BigInt(frac);
+        var out=wei/BigInt(d);
         return weiToBNBString(out);
       }
-      var shownStr = div===1 ? totalBNBStr : divideDecimalString(totalBNBStr, div);
+      var shownStr=div===1?totalBNBStr:divideDecimalString(totalBNBStr,div);
 
-      elAmt.textContent = formatDecimalString(shownStr);
-      elAmt.classList.add('blink'); setTimeout(function(){ elAmt.classList.remove('blink'); }, 1100);
-      var t1 = performance.now();
-      elMeta.textContent = 'Direct normal hits: ' + norm.hitsToB + ' · Internal hits (via A tx): ' + intr.hits + ' · API calls: ' + (norm.reqs + intr.reqs) + ' · Offset: ' + OFFSET + ' · ' + ((t1-t0)|0) + ' ms' + (DIVIDE&&DIVIDE!==1?(' · ÷ '+DIVIDE):'');
+      elAmt.textContent=formatDecimalString(shownStr);
+      elAmt.classList.add('blink'); setTimeout(()=>elAmt.classList.remove('blink'),1100);
+      var t1=performance.now();
+      elMeta.textContent=`Direct hits: ${norm.hitsToB} · Internal hits: ${intr.hits} · API calls: ${norm.reqs+intr.reqs} · ${(t1-t0)|0} ms`;
     }catch(err){
-      console.error(err);
-      elMeta.innerHTML = '<span class="err">Error:</span> ' + (err.message||err);
-    }
-  }(){
-    if(!APIKEY){
-      elMeta.innerHTML = '<span class="err">Missing apikey.</span> Add <code>?apikey=YOUR_BSCSCAN_KEY</code> to the URL.';
-      return;
-    }
-    elMeta.textContent = 'Fetching…';
-    var t0 = performance.now();
-    try{
-      var normal = await sumEndpoint('txlist');
-      var internal = await sumEndpoint('txlistinternal');
-      var totalWei = normal.totalWei + internal.totalWei;
-      var totalBNBStr = weiToBNBString(totalWei);
-      var div = DIVIDE || 1;
-      function divideDecimalString(decStr, d){
-        var parts = decStr.split('.');
-        var whole = parts[0];
-        var frac = (parts[1]||'').padEnd(18,'0').slice(0,18);
-        var wei = BigInt(whole) * 1000000000000000000n + BigInt(frac);
-        var out = wei / BigInt(d);
-        return weiToBNBString(out);
-      }
-      var shownStr = div===1 ? totalBNBStr : divideDecimalString(totalBNBStr, div);
-      elAmt.textContent = formatDecimalString(shownStr);
-      elAmt.classList.add('blink'); setTimeout(function(){ elAmt.classList.remove('blink'); }, 1100);
-      var t1 = performance.now();
-      elMeta.textContent = 'Normal hits: ' + normal.hits + ' · Internal hits: ' + internal.hits + ' · Pages: ' + (normal.requests+internal.requests) + ' · Offset: ' + OFFSET + ' · ' + ((t1-t0)|0) + ' ms' + (DIVIDE&&DIVIDE!==1?(' · ÷ '+DIVIDE):'');
-    }catch(err){
-      console.error(err);
-      elMeta.innerHTML = '<span class="err">Error:</span> ' + (err.message||err);
+      elMeta.innerHTML='<span class=\"err\">Error:</span> '+(err.message||err);
     }
   }
 
   compute();
-  if(REFRESH>0) setInterval(compute, REFRESH);
+  if(REFRESH>0) setInterval(compute,REFRESH);
 })();
 </script>
 </body>
