@@ -3,204 +3,103 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>BscScan $ Counter – URL • Paste • CSV</title>
+  <title>Donations – Auto Counter</title>
   <style>
-    :root { --bg:#0a0b0e; --card:#111318; --muted:#8a93a6; --acc:#ffd43b; --text:#e7ecf3; }
-    *{box-sizing:border-box} body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,Inter,Arial;background:linear-gradient(180deg,#0a0b0e,#0e1117);color:var(--text)}
-    .wrap{max-width:1100px;margin:40px auto;padding:0 16px}
-    .card{background:var(--card);border:1px solid #1b1f2a;border-radius:16px;box-shadow:0 10px 30px rgba(0,0,0,.35);padding:20px;margin-bottom:18px}
-    h1{font-size:clamp(20px,3vw,28px);margin:0 0 12px;letter-spacing:.3px}
-    h2{font-size:18px;margin:18px 0 8px;color:var(--acc)}
-    label{display:block;color:var(--muted);font-size:13px;margin:.2rem 0 .5rem}
-    input,textarea,button{font:inherit}
-    input[type="text"], textarea{width:100%;background:#0d0f14;border:1px solid #232838;color:var(--text);padding:10px 12px;border-radius:12px;outline:none}
-    textarea{min-height:120px;resize:vertical}
-    .row{display:grid;gap:12px}
-    @media (min-width:900px){.row{grid-template-columns:1.2fr .8fr}}
-    .btn{display:inline-flex;align-items:center;gap:8px;background:#161a23;border:1px solid #2a3145;color:#eaf1ff;padding:10px 14px;border-radius:12px;cursor:pointer}
-    .btn:hover{filter:brightness(1.08)}
-    .btn.acc{background:var(--acc);border-color:#c7a600;color:#140f00;font-weight:700}
-    .grid{display:grid;gap:10px}
-    .stats{display:grid;grid-template-columns:repeat(2,1fr);gap:12px}
-    .stat{background:#0c0f15;border:1px solid #1e2331;border-radius:12px;padding:12px}
-    .mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
-    .list{max-height:280px;overflow:auto;border:1px dashed #2a3246;border-radius:12px;padding:10px;background:#0c0f15}
-    .muted{color:var(--muted)}
-    .small{font-size:12px}
-    .flex{display:flex;gap:10px;flex-wrap:wrap}
-    .pill{padding:4px 8px;border-radius:999px;background:#121726;border:1px solid #24304a}
-    code{background:#101522;border:1px solid #24304a;padding:2px 6px;border-radius:8px}
+    :root { --bg:#0a0b0e; --text:#e8eef7; --muted:#9aa3b2; --accent:#ffd43b; }
+    *{box-sizing:border-box}
+    html,body{height:100%}
+    body{margin:0;display:flex;align-items:center;justify-content:center;background:radial-gradient(1000px 600px at 70% -10%,#192034,#0b0e14), #0a0b0e;color:var(--text);font-family:Inter,system-ui,-apple-system,Segoe UI,Roboto,Arial}
+    .wrap{width:100%;max-width:1000px;padding:24px;text-align:center}
+    h1{font-size:clamp(18px,2.5vw,22px);font-weight:600;color:var(--muted);margin:0 0 16px}
+    .amt{font-variation-settings:'wght' 700; font-size:clamp(42px,12vw,120px); line-height:1.05; letter-spacing:1px}
+    .sub{margin-top:8px;color:var(--muted);font-size:clamp(12px,1.6vw,14px)}
+    .pill{display:inline-block;margin-top:14px;padding:6px 10px;border:1px solid #263049;border-radius:999px;color:#cbd6ea;background:#0f1320}
+    .err{color:#ff8a8a}
+    .blink{animation:blink 1s step-start 2}
+    @keyframes blink{50%{opacity:.35}}
   </style>
 </head>
 <body>
-<div class="wrap">
-  <div class="card">
-    <h1>💰 BscScan <span class="muted">$</span> Counter — URL • Paste • CSV</h1>
-    <p class="muted small">Extract all amounts containing a <strong>$</strong>, sum them, and show <em>total / 2</em>. Built for pages like <code>bscscan.com/txsInternal</code>. Works in three ways: fetch by URL (with a CORS-friendly proxy), paste raw text/HTML, or upload a CSV export.</p>
+  <div class="wrap">
+    <h1>Donations (Σ of all <span title="All values that look like $12.34">$</span> on the page ÷ 2)</h1>
+    <div id="amount" class="amt">$0.00</div>
+    <div id="meta" class="sub">Waiting for data…</div>
+    <div id="tip" class="pill">Use <code>?url=</code> to point at your BscScan internal tx page. Refreshes every 60s.</div>
   </div>
-
-  <div class="row">
-    <div class="card">
-      <h2>1) URL Fetch</h2>
-      <label for="url">BscScan URL</label>
-      <input id="url" type="text" placeholder="https://bscscan.com/txsInternal?a=0xbf310C4060c5399BE02B51f07850BAFF91269179&ps=100" />
-      <div class="flex" style="margin-top:10px">
-        <button class="btn acc" id="btnFetch">Fetch & Count</button>
-        <button class="btn" id="btnOpen">Open URL</button>
-        <span class="pill small">Uses <code>r.jina.ai</code> proxy to bypass CORS</span>
-      </div>
-    </div>
-
-    <div class="card">
-      <h2>2) Paste Text / HTML</h2>
-      <label for="paste">Paste page text or HTML</label>
-      <textarea id="paste" placeholder="Paste the page HTML or any text containing $ amounts…"></textarea>
-      <div class="flex" style="margin-top:10px">
-        <button class="btn acc" id="btnPaste">Count From Paste</button>
-        <button class="btn" id="btnClearPaste">Clear</button>
-      </div>
-    </div>
-  </div>
-
-  <div class="card">
-    <h2>3) CSV Upload</h2>
-    <label for="csv">Upload your BscScan CSV export(s)</label>
-    <input id="csv" type="file" accept=".csv" multiple />
-    <div class="flex" style="margin-top:10px">
-      <button class="btn acc" id="btnCSV">Count From CSV</button>
-      <span class="pill small">Parses all columns for <code>$</code> patterns</span>
-    </div>
-  </div>
-
-  <div class="card">
-    <h2>Results</h2>
-    <div class="stats">
-      <div class="stat"><div class="muted small">Matches</div><div id="count" class="mono" style="font-size:20px">0</div></div>
-      <div class="stat"><div class="muted small">Total $</div><div id="total" class="mono" style="font-size:20px">0.00</div></div>
-    </div>
-    <div class="stats" style="margin-top:10px">
-      <div class="stat"><div class="muted small">Total / 2</div><div id="half" class="mono" style="font-size:24px">0.00</div></div>
-      <div class="stat"><div class="muted small">Unique $ strings</div><div id="unique" class="mono" style="font-size:20px">0</div></div>
-    </div>
-
-    <div class="flex" style="margin:12px 0">
-      <button class="btn" id="btnCopy">Copy Values</button>
-      <button class="btn" id="btnCSVOut">Download CSV</button>
-      <span id="status" class="muted small"></span>
-    </div>
-
-    <div class="list mono small" id="list"></div>
-  </div>
-
-  <div class="card">
-    <h2>Bonus: Bookmarklet (count on any open page)</h2>
-    <p class="small">Drag this to your bookmarks bar: <a id="bm" href="#">$ Counter</a>. Open a page (e.g., BscScan), click the bookmarklet, and it will alert the total and total/2.</p>
-    <pre class="small mono" id="bmCode"></pre>
-  </div>
-
-  <div class="card">
-    <h2>Notes</h2>
-    <ul class="small">
-      <li>URL mode fetches via <code>https://r.jina.ai/http/&lt;your-url-without-protocol&gt;</code> for CORS. If it ever fails, use Paste or CSV mode.</li>
-      <li>Regex used: <code>/\$[\d,]+(?:\.\d+)?/g</code>. It sums every match; no currency conversion.</li>
-      <li>CSV mode reads all columns; if you export multiple pages, you can upload them all at once.</li>
-    </ul>
-  </div>
-</div>
 
 <script>
-  const $ = (id)=>document.getElementById(id);
+(function(){
+  var elAmt = document.getElementById('amount');
+  var elMeta = document.getElementById('meta');
+
+  var DEFAULT_URL = 'https://bscscan.com/txsInternal?a=0xbf310C4060c5399BE02B51f07850BAFF91269179&ps=100';
+
+  var qs = new URLSearchParams(location.search);
+  var target = qs.get('url') || DEFAULT_URL;
+  var divide = Number(qs.get('divide')||2);
+  var refreshMs = Number(qs.get('refresh_ms')||60000);
 
   function extractDollarValues(text){
-    const re = /\$[\d,]+(?:\.\d+)?/g;
-    const matches = text.match(re) || [];
-    const nums = matches.map(m=>parseFloat(m.replace(/[$,]/g,""))).filter(n=>!Number.isNaN(n));
-    return {matches, nums};
+    var re = /[$][0-9,]+(?:[.][0-9]+)?/g; // avoid backslashes in source for canvas tool
+    var matches = text.match(re) || [];
+    var nums = matches.map(function(m){ return parseFloat(m.replace(/[$,]/g,'')); }).filter(function(n){ return !Number.isNaN(n); });
+    var total = nums.reduce(function(a,b){return a+b;},0);
+    return { matches: matches, total: total };
   }
 
-  function render(values){
-    const {matches, nums} = values;
-    const total = nums.reduce((a,b)=>a+b,0);
-    const half = total/2;
-    const unique = [...new Set(matches)];
-    $("count").textContent = matches.length.toLocaleString();
-    $("total").textContent = total.toLocaleString(undefined,{maximumFractionDigits:8});
-    $("half").textContent = half.toLocaleString(undefined,{maximumFractionDigits:8});
-    $("unique").textContent = unique.length.toLocaleString();
-    $("list").innerHTML = matches.map(m=>`<div>${m}</div>`).join("") || '<span class="muted">No $ amounts found.</span>';
+  function stripProtocol(u){
+    if(u.indexOf('https://')===0) return u.slice(8);
+    if(u.indexOf('http://')===0) return u.slice(7);
+    return u;
   }
 
-  async function fetchURL(u){
-    if(!u) throw new Error('URL is empty');
-    const noProto = u.replace(/^https?:\/\//,'');
-    const proxied = `https://r.jina.ai/http/${noProto}`; // simple CORS-free text proxy
-    const res = await fetch(proxied, {headers:{'accept':'text/plain'}});
-    if(!res.ok) throw new Error(`Fetch failed: ${res.status}`);
-    return await res.text();
+  function fetchViaProxy(url){
+    return fetch('/api/proxy?url=' + encodeURIComponent(url))
+      .then(function(r){ if(!r.ok) throw new Error('proxy ' + r.status); return r.text(); })
+      .catch(function(){
+        var noProto = stripProtocol(url);
+        return fetch('https://r.jina.ai/http/' + noProto, { headers:{ 'accept':'text/plain' } })
+          .then(function(r){ if(!r.ok) throw new Error('fallback ' + r.status); return r.text(); });
+      });
   }
 
-  $("btnFetch").onclick = async ()=>{
-    $("status").textContent = 'Fetching…';
-    try{
-      const url = $("url").value.trim();
-      const text = await fetchURL(url);
-      const vals = extractDollarValues(text);
-      render(vals);
-      window.__vals = vals;
-      $("status").textContent = `Fetched and parsed ${vals.matches.length} values.`;
-    }catch(e){
-      console.error(e);
-      $("status").textContent = 'Error: '+e.message;
-    }
-  };
+  function tick(){
+    elMeta.textContent = 'Fetching…';
+    var t0 = performance.now();
+    fetchViaProxy(target).then(function(text){
+      var out = extractDollarValues(text);
+      var half = out.total / (divide || 1);
+      var t1 = performance.now();
+      elAmt.textContent = '$' + half.toLocaleString(undefined,{ maximumFractionDigits:8 });
+      elAmt.classList.add('blink'); setTimeout(function(){ elAmt.classList.remove('blink'); }, 1100);
+      elMeta.innerHTML = 'Source: <a href="' + target + '" target="_blank" rel="noreferrer">BscScan</a> · Found ' + out.matches.length + ' $-values · Total: $' + out.total.toLocaleString(undefined,{ maximumFractionDigits:8 }) + ' · Displayed ÷ ' + divide + ' · ' + (t1 - t0 | 0) + ' ms';
+    }).catch(function(err){
+      console.error(err);
+      elMeta.innerHTML = '<span class="err">Error:</span> ' + err.message + '. Try using the default URL or add <code>?url=…</code>.';
+    });
+  }
 
-  $("btnOpen").onclick = ()=>{
-    const url = $("url").value.trim();
-    if(url) window.open(url, '_blank');
-  };
-
-  $("btnPaste").onclick = ()=>{
-    const text = $("paste").value;
-    const vals = extractDollarValues(text);
-    render(vals);
-    window.__vals = vals;
-    $("status").textContent = `Parsed ${vals.matches.length} values from pasted text.`;
-  };
-  $("btnClearPaste").onclick = ()=>{ $("paste").value=''; };
-
-  $("btnCSV").onclick = async ()=>{
-    const files = $("csv").files;
-    if(!files.length){ $("status").textContent = 'No CSV selected.'; return; }
-    $("status").textContent = 'Reading CSV…';
-    let textAll = '';
-    for(const f of files){ textAll += await f.text() + '\n'; }
-    const vals = extractDollarValues(textAll);
-    render(vals);
-    window.__vals = vals;
-    $("status").textContent = `Parsed ${vals.matches.length} values from ${files.length} file(s).`;
-  };
-
-  $("btnCopy").onclick = async ()=>{
-    const vals = window.__vals; if(!vals){ $("status").textContent = 'Nothing to copy yet.'; return; }
-    const blob = vals.matches.join('\n');
-    await navigator.clipboard.writeText(blob);
-    $("status").textContent = 'Copied values to clipboard.';
-  };
-
-  $("btnCSVOut").onclick = ()=>{
-    const vals = window.__vals; if(!vals){ $("status").textContent = 'No data to export.'; return; }
-    const rows = vals.matches.map(v=>`"${v}"`).join('\n');
-    const csv = 'value\n' + rows;
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(new Blob([csv],{type:'text/csv'}));
-    a.download = 'dollar_values.csv';
-    a.click();
-  };
-
-  // Build bookmarklet
-  const bm = `javascript:(()=>{try{const re=/\\$[\\d,]+(?:\\.\\d+)?/g;const t=document.body.innerText||'';const m=t.match(re)||[];const n=m.map(x=>parseFloat(x.replace(/[$,]/g,''))).filter(v=>!Number.isNaN(v));const s=n.reduce((a,b)=>a+b,0);alert('Matches: '+m.length+'\nTotal: $'+s.toLocaleString()+\n'Total/2: $'+(s/2).toLocaleString());}catch(e){alert('Error: '+e.message)}})();`;
-  $("bm").href = bm;
-  $("bmCode").textContent = bm;
+  tick();
+  if (refreshMs > 0) setInterval(tick, refreshMs);
+})();
 </script>
 </body>
 </html>
+
+<!-- Create a second file at /api/proxy.js if you want your own CORS-free proxy on Vercel: -->
+<!--
+export const config = { runtime: 'edge' };
+export default async (req) => {
+  try {
+    const { searchParams } = new URL(req.url);
+    let target = searchParams.get('url');
+    if (!target) return new Response('Missing url', { status: 400 });
+    if (!/^https?:\/\//i.test(target)) target = 'https://' + target;
+    const res = await fetch(target, { headers: { 'user-agent':'Mozilla/5.0' } });
+    const text = await res.text();
+    return new Response(text, { headers: { 'content-type': 'text/plain; charset=utf-8', 'access-control-allow-origin': '*', 'cache-control': 's-maxage=60, stale-while-revalidate=300' } });
+  } catch (e) {
+    return new Response('Proxy error: ' + e.message, { status: 500 });
+  }
+};
+-->
