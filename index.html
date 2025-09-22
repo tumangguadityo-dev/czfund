@@ -3,16 +3,16 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Donations – Auto Counter (BNB)</title>
+  <title>BNB Sent – Auto Counter (A ➜ B)</title>
   <style>
     :root { --bg:#0a0b0e; --text:#e8eef7; --muted:#9aa3b2; --accent:#f3ba2f; }
     *{box-sizing:border-box}
     html,body{height:100%}
     body{margin:0;display:flex;align-items:center;justify-content:center;background:#0a0b0e;color:var(--text);font-family:Inter,system-ui,-apple-system,Segoe UI,Roboto,Arial}
-    .wrap{width:100%;max-width:1000px;padding:24px;text-align:center}
-    h1{font-size:clamp(18px,2.5vw,22px);font-weight:600;color:var(--muted);margin:0 0 16px}
-    .amt{font-weight:700; font-size:clamp(42px,12vw,120px); line-height:1.05; letter-spacing:1px; color:var(--accent)}
-    .sub{margin-top:8px;color:var(--muted);font-size:clamp(12px,1.6vw,14px)}
+    .wrap{width:100%;max-width:1100px;padding:24px;text-align:center}
+    h1{font-size:clamp(18px,2.5vw,22px);font-weight:600;color:var(--muted);margin:0 0 10px}
+    .amt{font-weight:800;font-size:clamp(42px,12vw,120px);line-height:1.05;letter-spacing:1px;color:var(--accent)}
+    .sub{margin-top:10px;color:var(--muted);font-size:clamp(12px,1.6vw,14px)}
     .err{color:#ff8a8a}
     .blink{animation:blink 1s step-start 2}
     @keyframes blink{50%{opacity:.35}}
@@ -20,7 +20,7 @@
 </head>
 <body>
   <div class="wrap">
-    <h1>BNB Donations (Σ of all values with “BNB” ÷ 2)</h1>
+    <h1>BNB sent from <code id="fromA"></code> ➜ <code id="toB"></code></h1>
     <div id="amount" class="amt">0 BNB</div>
     <div id="meta" class="sub">Waiting for data…</div>
   </div>
@@ -29,27 +29,27 @@
 (function(){
   var elAmt = document.getElementById('amount');
   var elMeta = document.getElementById('meta');
+  var elFrom = document.getElementById('fromA');
+  var elTo   = document.getElementById('toB');
 
-  var DEFAULT_URL = 'https://bscscan.com/txsInternal?a=0xbf310C4060c5399BE02B51f07850BAFF91269179&ps=100';
+  // Defaults (your addresses)
+  var DEFAULT_FROM = '0xbf310C4060c5399BE02B51f07850BAFF91269179';
+  var DEFAULT_TO   = '0x28816c4C4792467390C90e5B426F198570E29307';
+
+  // BscScan internal tx page for the FROM address
+  function makeDefaultURL(addr){
+    return 'https://bscscan.com/txsInternal?a=' + addr + '&ps=100';
+  }
 
   var qs = new URLSearchParams(location.search);
-  var target = qs.get('url') || DEFAULT_URL;
-  var divide = Number(qs.get('divide')||2);
+  var ADDR_FROM = (qs.get('from') || DEFAULT_FROM).trim();
+  var ADDR_TO   = (qs.get('to')   || DEFAULT_TO  ).trim();
+  var targetURL = qs.get('url') || makeDefaultURL(ADDR_FROM);
   var refreshMs = Number(qs.get('refresh_ms')||60000);
+  var divide    = Number(qs.get('divide')||1); // show raw by default
 
-  function extractBNBValues(text){
-    var re = /([0-9]+(?:\.[0-9]+)?)\s*BNB/gi;
-    var matches = [];
-    var nums = [];
-    var m;
-    while((m = re.exec(text)) !== null){
-      matches.push(m[0]);
-      var val = parseFloat(m[1]);
-      if(!Number.isNaN(val)) nums.push(val);
-    }
-    var total = nums.reduce(function(a,b){return a+b;},0);
-    return { matches: matches, total: total };
-  }
+  elFrom.textContent = ADDR_FROM;
+  elTo.textContent = ADDR_TO;
 
   function stripProtocol(u){
     if(u.indexOf('https://')===0) return u.slice(8);
@@ -67,19 +67,68 @@
       });
   }
 
+  // Parse the BscScan HTML and sum BNB where row From==ADDR_FROM and To==ADDR_TO
+  function sumBNB_AtoB(htmlText){
+    var parser = new DOMParser();
+    var doc = parser.parseFromString(htmlText, 'text/html');
+    var rows = Array.from(doc.querySelectorAll('table tbody tr'));
+    var fromLC = ADDR_FROM.toLowerCase();
+    var toLC   = ADDR_TO.toLowerCase();
+    var total = 0;
+    var hits = 0;
+
+    function getAddrFromHref(a){
+      try{
+        var href = a.getAttribute('href') || '';
+        // patterns like /address/0xabc... or full https
+        var m = href.match(/address\/(0x[a-fA-F0-9]{40})/);
+        return m ? m[1].toLowerCase() : '';
+      }catch(_){ return ''; }
+    }
+
+    function parseBNBFromRow(tr){
+      var txt = tr.textContent || '';
+      // Prefer the Value column: try to find the last number followed by BNB
+      var m = txt.match(/([0-9]+(?:\.[0-9]+)?)\s*BNB/gi);
+      if(!m) return 0;
+      var last = m[m.length-1];
+      var n = parseFloat(last.replace(/[^0-9.]/g,''));
+      return Number.isFinite(n) ? n : 0;
+    }
+
+    rows.forEach(function(tr){
+      // Find all address anchors in the row
+      var anchors = Array.from(tr.querySelectorAll('a[href*="/address/"]'));
+      if(anchors.length === 0) return;
+      // Map to addresses (lowercase)
+      var addrs = anchors.map(getAddrFromHref).filter(Boolean);
+      if(addrs.length < 2) return;
+      // Heuristic: first occurrence is From, second occurrence is To on BscScan rows
+      var fromIdx = addrs.indexOf(fromLC);
+      var toIdx   = addrs.indexOf(toLC);
+      if(fromIdx === -1 || toIdx === -1) return;
+      if(toIdx <= fromIdx) return; // ensure direction From ➜ To
+
+      var val = parseBNBFromRow(tr);
+      if(val > 0){ total += val; hits++; }
+    });
+
+    return { total: total, hits: hits };
+  }
+
   function tick(){
     elMeta.textContent = 'Fetching…';
     var t0 = performance.now();
-    fetchViaProxy(target).then(function(text){
-      var out = extractBNBValues(text);
-      var half = out.total / (divide || 1);
+    fetchViaProxy(targetURL).then(function(text){
+      var out = sumBNB_AtoB(text);
+      var shown = out.total / (divide || 1);
       var t1 = performance.now();
-      elAmt.textContent = half.toLocaleString(undefined,{ maximumFractionDigits:8 }) + ' BNB';
+      elAmt.textContent = shown.toLocaleString(undefined,{ maximumFractionDigits:8 }) + ' BNB';
       elAmt.classList.add('blink'); setTimeout(function(){ elAmt.classList.remove('blink'); }, 1100);
-      elMeta.innerHTML = 'Source: <a href="' + target + '" target="_blank" rel="noreferrer">BscScan</a> · Found ' + out.matches.length + ' BNB-values · Total: ' + out.total.toLocaleString(undefined,{ maximumFractionDigits:8 }) + ' BNB · Displayed ÷ ' + divide + ' · ' + (t1 - t0 | 0) + ' ms';
+      elMeta.innerHTML = 'Source: <a href="' + targetURL + '" target="_blank" rel="noreferrer">BscScan</a> · Matched rows: ' + out.hits + ' · Raw total: ' + out.total.toLocaleString(undefined,{ maximumFractionDigits:8 }) + ' BNB · ÷ ' + (divide||1) + ' · ' + (t1 - t0 | 0) + ' ms';
     }).catch(function(err){
       console.error(err);
-      elMeta.innerHTML = '<span class="err">Error:</span> ' + err.message;
+      elMeta.innerHTML = '<span class="err">Error:</span> ' + err.message + '. If fallback 400, add <code>?url=…</code> or try later.';
     });
   }
 
