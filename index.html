@@ -1,206 +1,267 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>BscScan $ Counter – URL • Paste • CSV</title>
-  <style>
-    :root { --bg:#0a0b0e; --card:#111318; --muted:#8a93a6; --acc:#ffd43b; --text:#e7ecf3; }
-    *{box-sizing:border-box} body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,Inter,Arial;background:linear-gradient(180deg,#0a0b0e,#0e1117);color:var(--text)}
-    .wrap{max-width:1100px;margin:40px auto;padding:0 16px}
-    .card{background:var(--card);border:1px solid #1b1f2a;border-radius:16px;box-shadow:0 10px 30px rgba(0,0,0,.35);padding:20px;margin-bottom:18px}
-    h1{font-size:clamp(20px,3vw,28px);margin:0 0 12px;letter-spacing:.3px}
-    h2{font-size:18px;margin:18px 0 8px;color:var(--acc)}
-    label{display:block;color:var(--muted);font-size:13px;margin:.2rem 0 .5rem}
-    input,textarea,button{font:inherit}
-    input[type="text"], textarea{width:100%;background:#0d0f14;border:1px solid #232838;color:var(--text);padding:10px 12px;border-radius:12px;outline:none}
-    textarea{min-height:120px;resize:vertical}
-    .row{display:grid;gap:12px}
-    @media (min-width:900px){.row{grid-template-columns:1.2fr .8fr}}
-    .btn{display:inline-flex;align-items:center;gap:8px;background:#161a23;border:1px solid #2a3145;color:#eaf1ff;padding:10px 14px;border-radius:12px;cursor:pointer}
-    .btn:hover{filter:brightness(1.08)}
-    .btn.acc{background:var(--acc);border-color:#c7a600;color:#140f00;font-weight:700}
-    .grid{display:grid;gap:10px}
-    .stats{display:grid;grid-template-columns:repeat(2,1fr);gap:12px}
-    .stat{background:#0c0f15;border:1px solid #1e2331;border-radius:12px;padding:12px}
-    .mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
-    .list{max-height:280px;overflow:auto;border:1px dashed #2a3246;border-radius:12px;padding:10px;background:#0c0f15}
-    .muted{color:var(--muted)}
-    .small{font-size:12px}
-    .flex{display:flex;gap:10px;flex-wrap:wrap}
-    .pill{padding:4px 8px;border-radius:999px;background:#121726;border:1px solid #24304a}
-    code{background:#101522;border:1px solid #24304a;padding:2px 6px;border-radius:8px}
-  </style>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>CSV Donation Counter (BNB / $)</title>
+<style>
+  :root{--bg:#0a0b0e;--text:#e8eef7;--muted:#9aa3b2;--accent:#f3ba2f}
+  html,body{height:100%;margin:0;font-family:Inter,system-ui,-apple-system,Segoe UI,Roboto,Arial;background:#04050a;color:var(--text);display:flex;align-items:center;justify-content:center}
+  .wrap{width:100%;max-width:980px;padding:28px;text-align:center}
+  h1{margin:0 0 8px;color:var(--muted);font-weight:600;font-size:16px}
+  .amount{font-size:clamp(36px,10vw,120px);font-weight:800;color:var(--accent);line-height:1}
+  .meta{margin-top:6px;color:var(--muted);font-size:13px}
+  .controls{margin-top:18px;display:flex;gap:10px;justify-content:center;flex-wrap:wrap}
+  input[type="file"]{display:none}
+  .btn{background:#0f1420;border:1px solid #233048;color:#eaf1ff;padding:10px 14px;border-radius:10px;cursor:pointer}
+  .small{font-size:12px;color:var(--muted)}
+  .error{color:#ff8a8a;margin-top:10px}
+  .list{margin-top:14px;max-height:220px;overflow:auto;background:#07101a;padding:8px;border-radius:8px;border:1px dashed #1f2a3a;text-align:left;font-family:ui-monospace,monospace;color:#dfe9ff}
+  a.link{color:#cfe3ff}
+</style>
 </head>
 <body>
-<div class="wrap">
-  <div class="card">
-    <h1>💰 BscScan <span class="muted">$</span> Counter — URL • Paste • CSV</h1>
-    <p class="muted small">Extract all amounts containing a <strong>$</strong>, sum them, and show <em>total / 2</em>. Built for pages like <code>bscscan.com/txsInternal</code>. Works in three ways: fetch by URL (with a CORS-friendly proxy), paste raw text/HTML, or upload a CSV export.</p>
-  </div>
+  <div class="wrap">
+    <h1>CSV Donation Counter — shows total (and total ÷ 2)</h1>
+    <div id="amount" class="amount">0 BNB</div>
+    <div id="meta" class="meta">Upload CSV or point to a CSV URL with <code>?csv_url=</code></div>
 
-  <div class="row">
-    <div class="card">
-      <h2>1) URL Fetch</h2>
-      <label for="url">BscScan URL</label>
-      <input id="url" type="text" placeholder="https://bscscan.com/txsInternal?a=0xbf310C4060c5399BE02B51f07850BAFF91269179&ps=100" />
-      <div class="flex" style="margin-top:10px">
-        <button class="btn acc" id="btnFetch">Fetch & Count</button>
-        <button class="btn" id="btnOpen">Open URL</button>
-        <span class="pill small">Uses <code>r.jina.ai</code> proxy to bypass CORS</span>
+    <div class="controls" role="group" aria-label="controls">
+      <label class="btn">
+        Upload CSV
+        <input id="file" type="file" accept=".csv,text/csv" />
+      </label>
+
+      <button class="btn" id="btnFetchUrl">Fetch CSV URL</button>
+
+      <button class="btn" id="btnDownload">Download Matched Rows</button>
+    </div>
+
+    <div class="small" style="margin-top:10px">
+      Mode: <span id="mode">currency=bnb</span> · Filters: <span id="filterinfo">none</span>
+      <div style="margin-top:6px" class="small muted">Usage examples:
+        <a class="link" href="?csv_url=https://backdoor.example/txs.csv&currency=bnb&from=0xbf31...9179&to=0x2881...9307" target="_blank">?csv_url=...&currency=bnb&from=...&to=...</a>
       </div>
     </div>
 
-    <div class="card">
-      <h2>2) Paste Text / HTML</h2>
-      <label for="paste">Paste page text or HTML</label>
-      <textarea id="paste" placeholder="Paste the page HTML or any text containing $ amounts…"></textarea>
-      <div class="flex" style="margin-top:10px">
-        <button class="btn acc" id="btnPaste">Count From Paste</button>
-        <button class="btn" id="btnClearPaste">Clear</button>
-      </div>
-    </div>
+    <div id="err" class="error" role="alert" style="display:none"></div>
+
+    <div id="rows" class="list" aria-live="polite"></div>
   </div>
-
-  <div class="card">
-    <h2>3) CSV Upload</h2>
-    <label for="csv">Upload your BscScan CSV export(s)</label>
-    <input id="csv" type="file" accept=".csv" multiple />
-    <div class="flex" style="margin-top:10px">
-      <button class="btn acc" id="btnCSV">Count From CSV</button>
-      <span class="pill small">Parses all columns for <code>$</code> patterns</span>
-    </div>
-  </div>
-
-  <div class="card">
-    <h2>Results</h2>
-    <div class="stats">
-      <div class="stat"><div class="muted small">Matches</div><div id="count" class="mono" style="font-size:20px">0</div></div>
-      <div class="stat"><div class="muted small">Total $</div><div id="total" class="mono" style="font-size:20px">0.00</div></div>
-    </div>
-    <div class="stats" style="margin-top:10px">
-      <div class="stat"><div class="muted small">Total / 2</div><div id="half" class="mono" style="font-size:24px">0.00</div></div>
-      <div class="stat"><div class="muted small">Unique $ strings</div><div id="unique" class="mono" style="font-size:20px">0</div></div>
-    </div>
-
-    <div class="flex" style="margin:12px 0">
-      <button class="btn" id="btnCopy">Copy Values</button>
-      <button class="btn" id="btnCSVOut">Download CSV</button>
-      <span id="status" class="muted small"></span>
-    </div>
-
-    <div class="list mono small" id="list"></div>
-  </div>
-
-  <div class="card">
-    <h2>Bonus: Bookmarklet (count on any open page)</h2>
-    <p class="small">Drag this to your bookmarks bar: <a id="bm" href="#">$ Counter</a>. Open a page (e.g., BscScan), click the bookmarklet, and it will alert the total and total/2.</p>
-    <pre class="small mono" id="bmCode"></pre>
-  </div>
-
-  <div class="card">
-    <h2>Notes</h2>
-    <ul class="small">
-      <li>URL mode fetches via <code>https://r.jina.ai/http/&lt;your-url-without-protocol&gt;</code> for CORS. If it ever fails, use Paste or CSV mode.</li>
-      <li>Regex used: <code>/\$[\d,]+(?:\.\d+)?/g</code>. It sums every match; no currency conversion.</li>
-      <li>CSV mode reads all columns; if you export multiple pages, you can upload them all at once.</li>
-    </ul>
-  </div>
-</div>
 
 <script>
-  const $ = (id)=>document.getElementById(id);
+/*
+  CSV Donation Counter (single-file)
+  - Defaults: currency=bnb
+  - Optional query params:
+      csv_url=URL to CSV (the page will fetch this)
+      currency=bnb | dollar
+      from=0x... (optional address filter for sender)
+      to=0x...   (optional address filter for receiver)
+      divide=1|2 (display divider; default 1)
+  - If /api/proxy exists on the same domain, the page will fetch csv_url via /api/proxy?url=...
+*/
 
-  function extractDollarValues(text){
-    const re = /\$[\d,]+(?:\.\d+)?/g;
-    const matches = text.match(re) || [];
-    const nums = matches.map(m=>parseFloat(m.replace(/[$,]/g,""))).filter(n=>!Number.isNaN(n));
-    return {matches, nums};
-  }
+const $ = id => document.getElementById(id);
+const fileInput = $('file'), btnFetchUrl = $('btnFetchUrl'), btnDownload = $('btnDownload');
+const amountEl = $('amount'), metaEl = $('meta'), errEl = $('err'), rowsEl = $('rows');
+const modeEl = $('mode'), filterEl = $('filterinfo');
 
-  function render(values){
-    const {matches, nums} = values;
-    const total = nums.reduce((a,b)=>a+b,0);
-    const half = total/2;
-    const unique = [...new Set(matches)];
-    $("count").textContent = matches.length.toLocaleString();
-    $("total").textContent = total.toLocaleString(undefined,{maximumFractionDigits:8});
-    $("half").textContent = half.toLocaleString(undefined,{maximumFractionDigits:8});
-    $("unique").textContent = unique.length.toLocaleString();
-    $("list").innerHTML = matches.map(m=>`<div>${m}</div>`).join("") || '<span class="muted">No $ amounts found.</span>';
-  }
+const qs = new URLSearchParams(location.search);
+const csvUrl = qs.get('csv_url') || '';
+const currency = (qs.get('currency') || 'bnb').toLowerCase(); // bnb or dollar
+const FROM = (qs.get('from') || '').toLowerCase();
+const TO   = (qs.get('to') || '').toLowerCase();
+const DIVIDE = Number(qs.get('divide') || 1);
 
-  async function fetchURL(u){
-    if(!u) throw new Error('URL is empty');
-    const noProto = u.replace(/^https?:\/\//,'');
-    const proxied = `https://r.jina.ai/http/${noProto}`; // simple CORS-free text proxy
-    const res = await fetch(proxied, {headers:{'accept':'text/plain'}});
-    if(!res.ok) throw new Error(`Fetch failed: ${res.status}`);
-    return await res.text();
-  }
+modeEl.textContent = `currency=${currency}`;
+filterEl.textContent = (FROM || TO) ? `from=${FROM||'*'} to=${TO||'*'}` : 'none';
 
-  $("btnFetch").onclick = async ()=>{
-    $("status").textContent = 'Fetching…';
-    try{
-      const url = $("url").value.trim();
-      const text = await fetchURL(url);
-      const vals = extractDollarValues(text);
-      render(vals);
-      window.__vals = vals;
-      $("status").textContent = `Fetched and parsed ${vals.matches.length} values.`;
-    }catch(e){
-      console.error(e);
-      $("status").textContent = 'Error: '+e.message;
+function showError(msg){ errEl.style.display='block'; errEl.textContent = msg; }
+function clearError(){ errEl.style.display='none'; errEl.textContent=''; }
+
+function parseCSV(text){
+  // Basic CSV parser tolerant of commas inside quotes.
+  // Returns array of rows (objects) and array of header names.
+  const lines = [];
+  let cur = '', inQ=false, row=[];
+  for(let i=0;i<text.length;i++){
+    const ch = text[i];
+    if(ch === '"' ) { inQ = !inQ; cur += ch; continue; }
+    if(ch === ',' && !inQ){ row.push(cur.trim()); cur=''; continue; }
+    if((ch === '\n' || ch === '\r') && !inQ){
+      if(cur !== '' || row.length>0){ row.push(cur.trim()); lines.push(row); row=[]; cur=''; }
+      // skip extra \r or \n
+      while(i+1<text.length && (text[i+1]==='\n' || text[i+1]==='\r')) i++;
+      continue;
     }
-  };
+    cur += ch;
+  }
+  if(cur !== '' || row.length>0){ row.push(cur.trim()); lines.push(row); }
+  if(lines.length===0) return { headers:[], rows:[] };
+  const headers = lines[0].map(h=>h.replace(/^"|"$/g,'').trim());
+  const data = lines.slice(1).map(r=>{
+    const obj = {};
+    for(let i=0;i<headers.length;i++){
+      obj[headers[i]] = (r[i]||'').replace(/^"|"$/g,'').trim();
+    }
+    return obj;
+  });
+  return { headers, rows: data };
+}
 
-  $("btnOpen").onclick = ()=>{
-    const url = $("url").value.trim();
-    if(url) window.open(url, '_blank');
-  };
+function extractValueFromRow(obj){
+  // Look for typical fields: value, amount, token, tokenValue, etc.
+  // - If currency=bnb: look for 'value' numeric or pattern '12.34 BNB' in any cell
+  // - If currency=dollar: look for $... patterns
+  // Returns numeric amount (float) or 0
+  const rowText = Object.values(obj).join(' ');
+  if(currency === 'bnb'){
+    // Try explicit numeric columns first
+    const candidates = ['value','amount','bnb','tokenValue','quantity'];
+    for(const c of candidates){
+      if(obj[c] && obj[c].length && !isNaN(Number(obj[c]))){
+        return Number(obj[c]);
+      }
+    }
+    // Try pattern like "12.34 BNB" or "BNB 12.34" or "12.34"
+    const re = /([0-9]+(?:\.[0-9]+)?)\s*BNB/ig;
+    const m = rowText.match(re);
+    if(m && m.length){
+      // sum matches in row if multiple
+      return m.reduce((s,t)=> s + Number(t.replace(/[^0-9.]/g,'')), 0);
+    }
+    // fallback: try any bare number in columns that look like value
+    const numRe = /([0-9]+\.[0-9]+)/g;
+    const found = rowText.match(numRe);
+    if(found && found.length) return Number(found[found.length-1]); // last number often value
+    return 0;
+  } else {
+    // dollar mode
+    const re = /\$[0-9,]+(?:\.[0-9]+)?/g;
+    const m = rowText.match(re);
+    if(!m) return 0;
+    return m.reduce((s,t)=> s + parseFloat(t.replace(/[$,]/g,'')), 0);
+  }
+}
 
-  $("btnPaste").onclick = ()=>{
-    const text = $("paste").value;
-    const vals = extractDollarValues(text);
-    render(vals);
-    window.__vals = vals;
-    $("status").textContent = `Parsed ${vals.matches.length} values from pasted text.`;
+function rowMatchesFilter(obj){
+  if(!FROM && !TO) return true;
+  // Accept common header names for addresses: from,to,fromAddress,toAddress,sender,receiver
+  const addrCandidates = key => {
+    const keys = Object.keys(obj).map(k=>k.toLowerCase());
+    const mapping = {
+      from: keys.find(k=>/from/.test(k)),
+      to:   keys.find(k=>/to/.test(k))
+    };
+    return mapping[key];
   };
-  $("btnClearPaste").onclick = ()=>{ $("paste").value=''; };
+  // find values
+  const fromKey = addrCandidates('from');
+  const toKey   = addrCandidates('to');
+  if(fromKey && FROM){
+    if((obj[fromKey]||'').toLowerCase() !== FROM) return false;
+  }
+  if(toKey && TO){
+    if((obj[toKey]||'').toLowerCase() !== TO) return false;
+  }
+  // If CSV doesn't include addresses, still allow everything (can't filter)
+  return true;
+}
 
-  $("btnCSV").onclick = async ()=>{
-    const files = $("csv").files;
-    if(!files.length){ $("status").textContent = 'No CSV selected.'; return; }
-    $("status").textContent = 'Reading CSV…';
-    let textAll = '';
-    for(const f of files){ textAll += await f.text() + '\n'; }
-    const vals = extractDollarValues(textAll);
-    render(vals);
-    window.__vals = vals;
-    $("status").textContent = `Parsed ${vals.matches.length} values from ${files.length} file(s).`;
-  };
+function renderResults(total, matchedRows){
+  const displayTotal = (total / (DIVIDE||1));
+  const unit = (currency==='bnb') ? 'BNB' : '$';
+  amountEl.textContent = `${displayTotal.toLocaleString(undefined,{maximumFractionDigits:8})} ${unit}`;
+  metaEl.textContent = `Found ${matchedRows.length} matching rows · Raw total: ${total.toLocaleString(undefined,{maximumFractionDigits:8})} ${unit}${DIVIDE&&DIVIDE!==1?(' · ÷ '+DIVIDE):''}`;
+  rowsEl.innerHTML = matchedRows.slice(0,200).map(r=>JSON.stringify(r)).join('<br>');
+  clearError();
+}
 
-  $("btnCopy").onclick = async ()=>{
-    const vals = window.__vals; if(!vals){ $("status").textContent = 'Nothing to copy yet.'; return; }
-    const blob = vals.matches.join('\n');
-    await navigator.clipboard.writeText(blob);
-    $("status").textContent = 'Copied values to clipboard.';
-  };
+async function processCSVText(text){
+  try{
+    const { headers, rows } = parseCSV(text);
+    // iterate rows, filter, extract amounts
+    let total = 0;
+    const matched = [];
+    for(const r of rows){
+      if(!rowMatchesFilter(r)) continue;
+      const val = extractValueFromRow(r);
+      if(val > 0){
+        total += val;
+        matched.push(r);
+      }
+    }
+    renderResults(total, matched);
+    return { total, matched };
+  }catch(e){
+    showError('CSV parse error: ' + (e.message||e));
+  }
+}
 
-  $("btnCSVOut").onclick = ()=>{
-    const vals = window.__vals; if(!vals){ $("status").textContent = 'No data to export.'; return; }
-    const rows = vals.matches.map(v=>`"${v}"`).join('\n');
-    const csv = 'value\n' + rows;
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(new Blob([csv],{type:'text/csv'}));
-    a.download = 'dollar_values.csv';
-    a.click();
-  };
+async function fetchCsvViaProxy(url){
+  // If /api/proxy exists on same domain, use it to avoid CORS
+  try {
+    const p = '/api/proxy?url=' + encodeURIComponent(url);
+    const r = await fetch(p);
+    if(r.ok) return await r.text();
+    // else fallback to remote proxy (jina)
+    const fallback = 'https://r.jina.ai/http/' + encodeURIComponent(url);
+    const rf = await fetch(fallback);
+    if(rf.ok) return await rf.text();
+    throw new Error('Fetch failed: ' + r.status);
+  } catch(e){
+    // try direct (may fail due to CORS)
+    const rd = await fetch(url).then(r=>r.text()).catch(()=>{ throw e; });
+    return rd;
+  }
+}
 
-  // Build bookmarklet
-  const bm = `javascript:(()=>{try{const re=/\\$[\\d,]+(?:\\.\\d+)?/g;const t=document.body.innerText||'';const m=t.match(re)||[];const n=m.map(x=>parseFloat(x.replace(/[$,]/g,''))).filter(v=>!Number.isNaN(v));const s=n.reduce((a,b)=>a+b,0);alert('Matches: '+m.length+'\nTotal: $'+s.toLocaleString()+\n'Total/2: $'+(s/2).toLocaleString());}catch(e){alert('Error: '+e.message)}})();`;
-  $("bm").href = bm;
-  $("bmCode").textContent = bm;
+// File upload event
+fileInput.addEventListener('change', async (ev) => {
+  if(!ev.target.files || ev.target.files.length===0) return;
+  const f = ev.target.files[0];
+  const text = await f.text();
+  await processCSVText(text);
+});
+
+// Fetch remote CSV if csv_url param present
+btnFetchUrl.addEventListener('click', async ()=>{
+  if(!csvUrl) return showError('No csv_url in querystring');
+  clearError(); metaEl.textContent = 'Fetching CSV…';
+  try{
+    const text = await fetchCsvViaProxy(csvUrl);
+    await processCSVText(text);
+  }catch(e){
+    showError('Fetch CSV failed: ' + (e.message||e));
+  }
+});
+
+// Auto-run fetch on load if csv_url provided
+(async function autoRun(){
+  if(csvUrl){
+    btnFetchUrl.textContent = 'Fetch CSV from URL';
+    try{
+      metaEl.textContent = 'Auto-fetching CSV…';
+      const text = await fetchCsvViaProxy(csvUrl);
+      await processCSVText(text);
+    }catch(e){
+      showError('Auto-fetch failed: ' + (e.message||e));
+    }
+  }
+})();
+
+// Download matched rows (simple CSV of JSON rows)
+btnDownload.addEventListener('click', ()=>{
+  const content = rowsEl.textContent || '';
+  if(!content) { showError('No matched rows to download'); return; }
+  const blob = new Blob([content], { type: 'text/plain' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'matched_rows.txt';
+  a.click();
+});
+
 </script>
 </body>
 </html>
