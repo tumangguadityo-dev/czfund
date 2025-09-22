@@ -58,8 +58,16 @@
   }
 
   function fetchViaProxy(url){
+    // Try your own Vercel Edge proxy first
     return fetch('/api/proxy?url=' + encodeURIComponent(url))
       .then(function(r){ if(!r.ok) throw new Error('proxy ' + r.status); return r.text(); })
+      .catch(function(){
+        // Fallback to r.jina.ai (must include the FULL URL incl. protocol!)
+        var full = 'https://r.jina.ai/http/' + encodeURIComponent(url);
+        return fetch(full, { headers:{ 'accept':'text/plain' } })
+          .then(function(r){ if(!r.ok) throw new Error('fallback ' + r.status); return r.text(); });
+      });
+  })
       .catch(function(){
         var noProto = stripProtocol(url);
         return fetch('https://r.jina.ai/http/' + noProto, { headers:{ 'accept':'text/plain' } })
