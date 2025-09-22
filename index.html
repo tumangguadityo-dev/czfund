@@ -1,188 +1,146 @@
 <!doctype html>
 <html lang="en">
 <head>
-<meta charset="utf-8" />
-<meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>BNB Donations — Auto CSV</title>
-<style>
-  :root{--bg:#04050a;--text:#e8eef7;--muted:#9aa3b2;--accent:#f3ba2f}
-  html,body{height:100%;margin:0;font-family:Inter,system-ui,-apple-system,Segoe UI,Roboto,Arial;background:linear-gradient(180deg,#070812,#02030a);color:var(--text);display:flex;align-items:center;justify-content:center}
-  .wrap{max-width:980px;padding:28px;text-align:center}
-  h1{margin:0 0 8px;color:var(--muted);font-weight:600;font-size:18px}
-  .amount{font-size:clamp(48px,12vw,120px);font-weight:800;color:var(--accent);line-height:1}
-  .meta{margin-top:8px;color:var(--muted);font-size:13px}
-  .controls{margin-top:18px;display:flex;gap:10px;justify-content:center;flex-wrap:wrap}
-  input[type="file"]{display:none}
-  .btn{background:#0f1420;border:1px solid #233048;color:#eaf1ff;padding:10px 14px;border-radius:10px;cursor:pointer}
-  .small{font-size:12px;color:var(--muted)}
-  .error{color:#ff8a8a;margin-top:10px}
-</style>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>BNB Donation Counter – CSV Upload</title>
+  <style>
+    :root { --bg:#0a0b0e; --text:#e8eef7; --muted:#9aa3b2; --accent:#f3ba2f; }
+    *{box-sizing:border-box}
+    html,body{height:100%}
+    body{margin:0;display:flex;align-items:center;justify-content:center;background:#0a0b0e;color:var(--text);font-family:Inter,system-ui,-apple-system,Segoe UI,Roboto,Arial}
+    .wrap{width:100%;max-width:900px;padding:24px;text-align:center}
+    h1{font-size:clamp(18px,3vw,28px);margin-bottom:20px;color:var(--muted)}
+    .amt{font-weight:800;font-size:clamp(42px,12vw,120px);line-height:1.05;letter-spacing:1px;color:var(--accent)}
+    .sub{margin-top:10px;color:var(--muted);font-size:clamp(12px,1.6vw,14px)}
+    .err{color:#ff8a8a}
+    input[type=file]{display:none}
+    .btn{display:none} /* hide upload button UI */
+  </style>
 </head>
 <body>
   <div class="wrap">
     <h1>BNB Donations Total</h1>
-    <div id="amount" class="amount">0 BNB</div>
-    <div id="meta" class="meta">No data yet — upload a CSV or provide <code>?csv_url=</code></div>
-
-    <div class="controls" aria-hidden>
-      <label class="btn">Upload CSV<input id="csv" type="file" accept=".csv" /></label>
-      <button class="btn" id="btnFetch">Fetch CSV URL</button>
-    </div>
-
-    <div id="err" class="error" style="display:none"></div>
+    <div id="amount" class="amt">0 BNB</div>
+    <div id="meta" class="sub">Waiting for CSV data…</div>
   </div>
 
 <script>
-/* Minimal, robust CSV-only UI. Auto-fetches csv_url ?csv_url=... on load.
-   Query params:
-     csv_url= (public URL to CSV) — e.g. https://czfund.vercel.app/files/txs.csv
-     currency=bnb|dollar (default bnb)
-     from=0x... (optional)
-     to=0x...   (optional)
-     divide=1|2 (display divider)
-*/
+(function(){
+  var elAmt = document.getElementById('amount');
+  var elMeta = document.getElementById('meta');
+  var elFrom = document.getElementById('fromA');
+  var elTo   = document.getElementById('toB');
 
-const elAmount = document.getElementById('amount');
-const elMeta = document.getElementById('meta');
-const elErr = document.getElementById('err');
-const fileInput = document.getElementById('csv');
-const btnFetch = document.getElementById('btnFetch');
+  // Defaults: your addresses
+  var DEFAULT_FROM = '0xbf310C4060c5399BE02B51f07850BAFF91269179';
+  var DEFAULT_TO   = '0x28816c4C4792467390C90e5B426F198570E29307';
 
-const qs = new URLSearchParams(location.search);
-const CSV_URL = qs.get('csv_url') || '';
-const CURRENCY = (qs.get('currency') || 'bnb').toLowerCase();
-const FILTER_FROM = (qs.get('from') || '').toLowerCase();
-const FILTER_TO   = (qs.get('to')   || '').toLowerCase();
-const DIVIDE = Number(qs.get('divide') || 1);
+  var qs = new URLSearchParams(location.search);
+  var ADDR_FROM = (qs.get('from') || DEFAULT_FROM).trim();
+  var ADDR_TO   = (qs.get('to')   || DEFAULT_TO  ).trim();
+  var APIKEY    = (qs.get('apikey')||'').trim();
+  var OFFSET    = Math.min(Math.max(parseInt(qs.get('offset')||'200',10)||200,10),10000);
+  var DIVIDE    = Number(qs.get('divide')||1);
+  var REFRESH   = Number(qs.get('refresh_ms')||60000);
 
-function showError(msg){ elErr.style.display='block'; elErr.textContent=msg; }
-function clearError(){ elErr.style.display='none'; elErr.textContent=''; }
+  if(elFrom) elFrom.textContent = ADDR_FROM;
+  if(elTo)   elTo.textContent   = ADDR_TO;
 
-function parseCSV(text){
-  // Simple CSV parser tolerant to quoted commas
-  const rows = [];
-  let cur = '', inQ=false, row=[];
-  for (let i=0;i<text.length;i++){
-    const ch=text[i];
-    if (ch==='\"') { inQ=!inQ; cur+=ch; continue; }
-    if (ch===',' && !inQ){ row.push(cur.trim()); cur=''; continue; }
-    if ((ch==='\n' || ch==='\r') && !inQ){
-      if (cur!=='' || row.length>0){ row.push(cur.trim()); rows.push(row); row=[]; cur=''; }
-      while (i+1<text.length && (text[i+1]==='\n' || text[i+1]==='\r')) i++;
-      continue;
+  function formatDecimalString(decStr){
+    if(!decStr.includes('.')){
+      try { return new Intl.NumberFormat().format(BigInt(decStr)) + ' BNB'; } catch(_) { return decStr + ' BNB'; }
     }
-    cur+=ch;
+    var parts = decStr.split('.');
+    var head = parts[0];
+    var tail = parts[1].replace(/0+$/,'').slice(0,8);
+    try { head = new Intl.NumberFormat().format(BigInt(head)); } catch(_) {}
+    return head + (tail?'.'+tail:'') + ' BNB';
   }
-  if (cur!=='' || row.length>0){ row.push(cur.trim()); rows.push(row); }
-  if (rows.length===0) return {headers:[],rows:[]};
-  const headers = rows[0].map(h=>h.replace(/^"|"$/g,'').trim());
-  const data = rows.slice(1).map(r=>{
-    const o={};
-    for (let i=0;i<headers.length;i++) o[headers[i]] = (r[i]||'').replace(/^"|"$/g,'').trim();
-    return o;
-  });
-  return { headers, rows: data };
-}
 
-function extractBNBFromRow(obj){
-  // look for common numeric fields first
-  const rowText = Object.values(obj).join(' ');
-  const candidates = ['value','amount','bnb','tokenValue','quantity'];
-  for (const c of candidates){
-    if (obj[c] && obj[c].length && !isNaN(Number(obj[c]))){
-      return Number(obj[c]);
-    }
+  function weiToBNBString(wei){
+    var w = typeof wei === 'bigint' ? wei : BigInt(wei);
+    var base = 1000000000000000000n;
+    var intPart = w / base;
+    var frac = (w % base).toString().padStart(18,'0');
+    frac = frac.replace(/0+$/,'');
+    return frac ? intPart.toString() + '.' + frac : intPart.toString();
   }
-  // match "12.34 BNB"
-  const re = /([0-9]+(?:\.[0-9]+)?)\s*BNB/ig;
-  let m, sum=0, found=false;
-  while ((m=re.exec(rowText))!==null){ sum+=Number(m[1]); found=true; }
-  if(found) return sum;
-  // try bare decimal numeric fallback (last number typically value)
-  const numRe = /([0-9]+\.[0-9]+)/g;
-  const arr = rowText.match(numRe);
-  if(arr && arr.length) return Number(arr[arr.length-1]);
-  return 0;
-}
 
-function extractDollarFromRow(obj){
-  const rowText = Object.values(obj).join(' ');
-  const re = /\$[0-9,]+(?:\.[0-9]+)?/g;
-  const m = rowText.match(re);
-  if(!m) return 0;
-  return m.reduce((s,t)=> s + parseFloat(t.replace(/[$,]/g,'')), 0);
-}
-
-function rowMatchesFilter(obj){
-  if(!FILTER_FROM && !FILTER_TO) return true;
-  const lowerKeys = Object.keys(obj).reduce((acc,k)=>{ acc[k.toLowerCase()]=k; return acc; },{});
-  const findKey = name => Object.keys(lowerKeys).find(k=>k.includes(name));
-  const fromKey = findKey('from') || findKey('sender') || null;
-  const toKey   = findKey('to')   || findKey('receiver') || null;
-  if(fromKey && FILTER_FROM && (obj[fromKey]||'').toLowerCase() !== FILTER_FROM) return false;
-  if(toKey   && FILTER_TO   && (obj[toKey]  ||'').toLowerCase() !== FILTER_TO) return false;
-  return true;
-}
-
-function renderResult(total, matchedCount){
-  const displayed = total / (DIVIDE || 1);
-  const unit = (CURRENCY==='bnb') ? 'BNB' : '$';
-  elAmount.textContent = `${displayed.toLocaleString(undefined,{maximumFractionDigits:8})} ${unit}`;
-  elMeta.textContent = `Matched rows: ${matchedCount} · Raw total: ${total.toLocaleString(undefined,{maximumFractionDigits:8})} ${unit}${DIVIDE&&DIVIDE!==1?(' · ÷ '+DIVIDE):''}`;
-  clearError();
-}
-
-async function processCSVText(text){
-  try{
-    const {headers, rows} = parseCSV(text);
-    let total=0, matched=0;
-    for (const r of rows){
-      if (!rowMatchesFilter(r)) continue;
-      const val = (CURRENCY==='bnb') ? extractBNBFromRow(r) : extractDollarFromRow(r);
-      if (val>0){ total+=val; matched++; }
-    }
-    renderResult(total, matched);
-  }catch(e){
-    showError('CSV parse error: '+ (e.message||e));
-  }
-}
-
-async function fetchCsvText(url){
-  // if URL is on same domain /api/proxy pattern not needed; rely on public S3 or backdoor endpoint
-  const res = await fetch(url, { credentials: 'omit' });
-  if(!res.ok) throw new Error('fetch failed: '+res.status);
-  return await res.text();
-}
-
-fileInput.addEventListener('change', async (ev)=>{
-  const f = ev.target.files && ev.target.files[0];
-  if(!f) return;
-  const text = await f.text();
-  await processCSVText(text);
-});
-
-btnFetch.addEventListener('click', async ()=>{
-  if(!CSV_URL) return showError('No csv_url provided in query string');
-  try{
-    elMeta.textContent = 'Fetching CSV…';
-    const txt = await fetchCsvText(CSV_URL);
-    await processCSVText(txt);
-  }catch(e){
-    showError('Fetch failed: '+ (e.message || e));
-  }
-});
-
-// auto-run if csv_url present
-(async function auto(){
-  if(CSV_URL){
+  async function fetchJSON(url){
     try{
-      elMeta.textContent = 'Auto-fetching CSV…';
-      const txt = await fetchCsvText(CSV_URL);
-      await processCSVText(txt);
-    }catch(e){
-      showError('Auto-fetch failed: ' + (e.message||e));
+      var p = '/api/proxy?url=' + encodeURIComponent(url);
+      var r = await fetch(p);
+      if(!r.ok) throw new Error('proxy '+r.status);
+      var t = await r.text();
+      return JSON.parse(t);
+    }catch(_){
+      var r2 = await fetch(url);
+      var t2 = await r2.text();
+      return JSON.parse(t2);
     }
   }
+
+  async function sumEndpoint(action){
+    var page = 1; var totalWei = 0n; var hits = 0; var reqs = 0;
+    var fromLC = ADDR_FROM.toLowerCase();
+    var toLC   = ADDR_TO.toLowerCase();
+    while(true){
+      var url = 'https://api.bscscan.com/api?module=account&action=' + action + '&address=' + ADDR_FROM + '&startblock=0&endblock=99999999&page=' + page + '&offset=' + OFFSET + '&sort=asc&apikey=' + APIKEY;
+      reqs++;
+      var data = await fetchJSON(url);
+      if(!data || data.status!=='1' || !Array.isArray(data.result) || data.result.length===0) break;
+      for(var i=0;i<data.result.length;i++){
+        var tx = data.result[i];
+        var f = (tx.from||'').toLowerCase();
+        var to = (tx.to||'').toLowerCase();
+        if(f===fromLC && to===toLC){
+          try{
+            var v = BigInt(tx.value || '0');
+            if(v>0n){ totalWei += v; hits++; }
+          }catch(e){}
+        }
+      }
+      if(data.result.length < OFFSET) break;
+      page++; if(page>2000) break;
+    }
+    return { totalWei: totalWei, hits: hits, requests: reqs };
+  }
+
+  async function compute(){
+    if(!APIKEY){
+      elMeta.innerHTML = '<span class="err">Missing apikey.</span> Add <code>?apikey=YOUR_BSCSCAN_KEY</code> to the URL.';
+      return;
+    }
+    elMeta.textContent = 'Fetching…';
+    var t0 = performance.now();
+    try{
+      var normal = await sumEndpoint('txlist');
+      var internal = await sumEndpoint('txlistinternal');
+      var totalWei = normal.totalWei + internal.totalWei;
+      var totalBNBStr = weiToBNBString(totalWei);
+      var div = DIVIDE || 1;
+      function divideDecimalString(decStr, d){
+        var parts = decStr.split('.');
+        var whole = parts[0];
+        var frac = (parts[1]||'').padEnd(18,'0').slice(0,18);
+        var wei = BigInt(whole) * 1000000000000000000n + BigInt(frac);
+        var out = wei / BigInt(d);
+        return weiToBNBString(out);
+      }
+      var shownStr = div===1 ? totalBNBStr : divideDecimalString(totalBNBStr, div);
+      elAmt.textContent = formatDecimalString(shownStr);
+      elAmt.classList.add('blink'); setTimeout(function(){ elAmt.classList.remove('blink'); }, 1100);
+      var t1 = performance.now();
+      elMeta.textContent = 'Normal hits: ' + normal.hits + ' · Internal hits: ' + internal.hits + ' · Pages: ' + (normal.requests+internal.requests) + ' · Offset: ' + OFFSET + ' · ' + ((t1-t0)|0) + ' ms' + (DIVIDE&&DIVIDE!==1?(' · ÷ '+DIVIDE):'');
+    }catch(err){
+      console.error(err);
+      elMeta.innerHTML = '<span class="err">Error:</span> ' + (err.message||err);
+    }
+  }
+
+  compute();
+  if(REFRESH>0) setInterval(compute, REFRESH);
 })();
 </script>
 </body>
