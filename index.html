@@ -81,33 +81,98 @@
     }
   }
 
-  async function sumEndpoint(action){
-    var page = 1; var totalWei = 0n; var hits = 0; var reqs = 0;
+  async function getAllNormalFromA(){
+    // Pull ALL normal tx where sender is ADDR_FROM; returns {totalWeiToB, hashesFromA}
+    var page = 1; var totalWeiToB = 0n; var reqs = 0; var hitsToB = 0; var hashes = [];
     var fromLC = ADDR_FROM.toLowerCase();
     var toLC   = ADDR_TO.toLowerCase();
     while(true){
-      var url = 'https://api.bscscan.com/api?module=account&action=' + action + '&address=' + ADDR_FROM + '&startblock=0&endblock=99999999&page=' + page + '&offset=' + OFFSET + '&sort=asc&apikey=' + APIKEY;
+      var url = 'https://api.bscscan.com/api?module=account&action=txlist&address=' + ADDR_FROM + '&startblock=0&endblock=99999999&page=' + page + '&offset=' + OFFSET + '&sort=asc&apikey=' + APIKEY;
       reqs++;
       var data = await fetchJSON(url);
-      if(!data || data.status!=='1' || !Array.isArray(data.result) || data.result.length===0) break;
+      if(!data || !Array.isArray(data.result) || data.result.length===0) break;
       for(var i=0;i<data.result.length;i++){
         var tx = data.result[i];
-        var f = (tx.from||'').toLowerCase();
-        var to = (tx.to||'').toLowerCase();
-        if(f===fromLC && to===toLC){
-          try{
-            var v = BigInt(tx.value || '0');
-            if(v>0n){ totalWei += v; hits++; }
-          }catch(e){}
+        if((tx.from||'').toLowerCase() !== fromLC) continue; // only txs sent by A
+        hashes.push(tx.hash);
+        if((tx.to||'').toLowerCase() === toLC && tx.isError === '0'){
+          try{ var v = BigInt(tx.value||'0'); if(v>0n){ totalWeiToB += v; hitsToB++; } }catch(_){ }
         }
       }
       if(data.result.length < OFFSET) break;
       page++; if(page>2000) break;
     }
-    return { totalWei: totalWei, hits: hits, requests: reqs };
+    return { totalWeiToB, hashes, reqs, hitsToB };
+  }
+
+  async function sumInternalsByHashes(hashes){
+    // For each tx hash originated by A, fetch internal traces and sum those whose TO == B
+    var toLC = ADDR_TO.toLowerCase();
+    var totalWei = 0n; var hits = 0; var reqs = 0;
+    // small concurrency to respect rate limits
+    var idx = 0; var CONC = 4;
+    async function worker(){
+      while(idx < hashes.length){
+        var my = idx++; var h = hashes[my];
+        var url = 'https://api.bscscan.com/api?module=account&action=txlistinternal&txhash=' + h + '&apikey=' + APIKEY;
+        reqs++;
+        try{
+          var data = await fetchJSON(url);
+          if(data && Array.isArray(data.result)){
+            for(var j=0;j<data.result.length;j++){
+              var itx = data.result[j];
+              if((itx.to||'').toLowerCase() === toLC){
+                try{ var v = BigInt(itx.value||'0'); if(v>0n){ totalWei += v; hits++; } }catch(_){ }
+              }
+            }
+          }
+        }catch(e){ /* ignore single-call errors */ }
+        // brief delay to be gentle
+        await new Promise(r=>setTimeout(r,120));
+      }
+    }
+    var workers = Array.from({length:Math.min(CONC, hashes.length)}, ()=>worker());
+    await Promise.all(workers);
+    return { totalWei, hits, reqs };
   }
 
   async function compute(){
+    if(!APIKEY){
+      elMeta.innerHTML = '<span class="err">Missing apikey.</span> Add <code>?apikey=YOUR_BSCSCAN_KEY</code> to the URL.';
+      return;
+    }
+    elMeta.textContent = 'Fetching (phase 1/2)…';
+    var t0 = performance.now();
+    try{
+      // Phase 1: normal tx from A (gets direct sends to B and the hash list)
+      var norm = await getAllNormalFromA();
+      // Phase 2: for those tx hashes, pull internal traces and sum ones ending at B
+      elMeta.textContent = 'Fetching (phase 2/2)…';
+      var intr = await sumInternalsByHashes(norm.hashes);
+
+      var totalWei = norm.totalWeiToB + intr.totalWei;
+      var totalBNBStr = weiToBNBString(totalWei);
+
+      var div = DIVIDE || 1;
+      function divideDecimalString(decStr, d){
+        var parts = decStr.split('.');
+        var whole = parts[0];
+        var frac = (parts[1]||'').padEnd(18,'0').slice(0,18);
+        var wei = BigInt(whole) * 1000000000000000000n + BigInt(frac);
+        var out = wei / BigInt(d);
+        return weiToBNBString(out);
+      }
+      var shownStr = div===1 ? totalBNBStr : divideDecimalString(totalBNBStr, div);
+
+      elAmt.textContent = formatDecimalString(shownStr);
+      elAmt.classList.add('blink'); setTimeout(function(){ elAmt.classList.remove('blink'); }, 1100);
+      var t1 = performance.now();
+      elMeta.textContent = 'Direct normal hits: ' + norm.hitsToB + ' · Internal hits (via A tx): ' + intr.hits + ' · API calls: ' + (norm.reqs + intr.reqs) + ' · Offset: ' + OFFSET + ' · ' + ((t1-t0)|0) + ' ms' + (DIVIDE&&DIVIDE!==1?(' · ÷ '+DIVIDE):'');
+    }catch(err){
+      console.error(err);
+      elMeta.innerHTML = '<span class="err">Error:</span> ' + (err.message||err);
+    }
+  }(){
     if(!APIKEY){
       elMeta.innerHTML = '<span class="err">Missing apikey.</span> Add <code>?apikey=YOUR_BSCSCAN_KEY</code> to the URL.';
       return;
