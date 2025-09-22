@@ -3,17 +3,16 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Donations – Auto Counter</title>
+  <title>Donations – Auto Counter (BNB)</title>
   <style>
-    :root { --bg:#0a0b0e; --text:#e8eef7; --muted:#9aa3b2; --accent:#ffd43b; }
+    :root { --bg:#0a0b0e; --text:#e8eef7; --muted:#9aa3b2; --accent:#f3ba2f; }
     *{box-sizing:border-box}
     html,body{height:100%}
-    body{margin:0;display:flex;align-items:center;justify-content:center;background:radial-gradient(1000px 600px at 70% -10%,#192034,#0b0e14), #0a0b0e;color:var(--text);font-family:Inter,system-ui,-apple-system,Segoe UI,Roboto,Arial}
+    body{margin:0;display:flex;align-items:center;justify-content:center;background:#0a0b0e;color:var(--text);font-family:Inter,system-ui,-apple-system,Segoe UI,Roboto,Arial}
     .wrap{width:100%;max-width:1000px;padding:24px;text-align:center}
     h1{font-size:clamp(18px,2.5vw,22px);font-weight:600;color:var(--muted);margin:0 0 16px}
-    .amt{font-variation-settings:'wght' 700; font-size:clamp(42px,12vw,120px); line-height:1.05; letter-spacing:1px}
+    .amt{font-weight:700; font-size:clamp(42px,12vw,120px); line-height:1.05; letter-spacing:1px; color:var(--accent)}
     .sub{margin-top:8px;color:var(--muted);font-size:clamp(12px,1.6vw,14px)}
-    .pill{display:inline-block;margin-top:14px;padding:6px 10px;border:1px solid #263049;border-radius:999px;color:#cbd6ea;background:#0f1320}
     .err{color:#ff8a8a}
     .blink{animation:blink 1s step-start 2}
     @keyframes blink{50%{opacity:.35}}
@@ -21,10 +20,9 @@
 </head>
 <body>
   <div class="wrap">
-    <h1>Donations (Σ of all <span title="All values that look like $12.34">$</span> on the page ÷ 2)</h1>
-    <div id="amount" class="amt">$0.00</div>
+    <h1>BNB Donations (Σ of all values with “BNB” ÷ 2)</h1>
+    <div id="amount" class="amt">0 BNB</div>
     <div id="meta" class="sub">Waiting for data…</div>
-    <div id="tip" class="pill">Use <code>?url=</code> to point at your BscScan internal tx page. Refreshes every 60s.</div>
   </div>
 
 <script>
@@ -39,10 +37,16 @@
   var divide = Number(qs.get('divide')||2);
   var refreshMs = Number(qs.get('refresh_ms')||60000);
 
-  function extractDollarValues(text){
-    var re = /[$][0-9,]+(?:[.][0-9]+)?/g; // avoid backslashes in source for canvas tool
-    var matches = text.match(re) || [];
-    var nums = matches.map(function(m){ return parseFloat(m.replace(/[$,]/g,'')); }).filter(function(n){ return !Number.isNaN(n); });
+  function extractBNBValues(text){
+    var re = /([0-9]+(?:\.[0-9]+)?)\s*BNB/gi;
+    var matches = [];
+    var nums = [];
+    var m;
+    while((m = re.exec(text)) !== null){
+      matches.push(m[0]);
+      var val = parseFloat(m[1]);
+      if(!Number.isNaN(val)) nums.push(val);
+    }
     var total = nums.reduce(function(a,b){return a+b;},0);
     return { matches: matches, total: total };
   }
@@ -67,15 +71,15 @@
     elMeta.textContent = 'Fetching…';
     var t0 = performance.now();
     fetchViaProxy(target).then(function(text){
-      var out = extractDollarValues(text);
+      var out = extractBNBValues(text);
       var half = out.total / (divide || 1);
       var t1 = performance.now();
-      elAmt.textContent = '$' + half.toLocaleString(undefined,{ maximumFractionDigits:8 });
+      elAmt.textContent = half.toLocaleString(undefined,{ maximumFractionDigits:8 }) + ' BNB';
       elAmt.classList.add('blink'); setTimeout(function(){ elAmt.classList.remove('blink'); }, 1100);
-      elMeta.innerHTML = 'Source: <a href="' + target + '" target="_blank" rel="noreferrer">BscScan</a> · Found ' + out.matches.length + ' $-values · Total: $' + out.total.toLocaleString(undefined,{ maximumFractionDigits:8 }) + ' · Displayed ÷ ' + divide + ' · ' + (t1 - t0 | 0) + ' ms';
+      elMeta.innerHTML = 'Source: <a href="' + target + '" target="_blank" rel="noreferrer">BscScan</a> · Found ' + out.matches.length + ' BNB-values · Total: ' + out.total.toLocaleString(undefined,{ maximumFractionDigits:8 }) + ' BNB · Displayed ÷ ' + divide + ' · ' + (t1 - t0 | 0) + ' ms';
     }).catch(function(err){
       console.error(err);
-      elMeta.innerHTML = '<span class="err">Error:</span> ' + err.message + '. Try using the default URL or add <code>?url=…</code>.';
+      elMeta.innerHTML = '<span class="err">Error:</span> ' + err.message;
     });
   }
 
@@ -85,21 +89,3 @@
 </script>
 </body>
 </html>
-
-<!-- Create a second file at /api/proxy.js if you want your own CORS-free proxy on Vercel: -->
-<!--
-export const config = { runtime: 'edge' };
-export default async (req) => {
-  try {
-    const { searchParams } = new URL(req.url);
-    let target = searchParams.get('url');
-    if (!target) return new Response('Missing url', { status: 400 });
-    if (!/^https?:\/\//i.test(target)) target = 'https://' + target;
-    const res = await fetch(target, { headers: { 'user-agent':'Mozilla/5.0' } });
-    const text = await res.text();
-    return new Response(text, { headers: { 'content-type': 'text/plain; charset=utf-8', 'access-control-allow-origin': '*', 'cache-control': 's-maxage=60, stale-while-revalidate=300' } });
-  } catch (e) {
-    return new Response('Proxy error: ' + e.message, { status: 500 });
-  }
-};
--->
