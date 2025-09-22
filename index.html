@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>BNB Sent – Auto Counter (A ➜ B)</title>
+  <title>BNB Sent – Auto Counter (A ➜ B) + Auto‑Pagination</title>
   <style>
     :root { --bg:#0a0b0e; --text:#e8eef7; --muted:#9aa3b2; --accent:#f3ba2f; }
     *{box-sizing:border-box}
@@ -16,6 +16,7 @@
     .err{color:#ff8a8a}
     .blink{animation:blink 1s step-start 2}
     @keyframes blink{50%{opacity:.35}}
+    .muted{color:var(--muted)}
   </style>
 </head>
 <body>
@@ -23,80 +24,91 @@
     <h1>BNB sent from <code id="fromA"></code> ➜ <code id="toB"></code></h1>
     <div id="amount" class="amt">0 BNB</div>
     <div id="meta" class="sub">Waiting for data…</div>
+    <div class="sub muted" id="extra"></div>
   </div>
 
 <script>
 (function(){
   var elAmt = document.getElementById('amount');
   var elMeta = document.getElementById('meta');
+  var elExtra = document.getElementById('extra');
   var elFrom = document.getElementById('fromA');
   var elTo   = document.getElementById('toB');
 
-  // Defaults (your addresses)
   var DEFAULT_FROM = '0xbf310C4060c5399BE02B51f07850BAFF91269179';
   var DEFAULT_TO   = '0x28816c4C4792467390C90e5B426F198570E29307';
-
-  // BscScan internal tx page for the FROM address
-  function makeDefaultURL(addr){
-    return 'https://bscscan.com/txsInternal?a=' + addr + '&ps=100';
-  }
 
   var qs = new URLSearchParams(location.search);
   var ADDR_FROM = (qs.get('from') || DEFAULT_FROM).trim();
   var ADDR_TO   = (qs.get('to')   || DEFAULT_TO  ).trim();
-  var targetURL = qs.get('url') || makeDefaultURL(ADDR_FROM);
+  var BASE_URL  = qs.get('url') || ('https://bscscan.com/txsInternal?a=' + ADDR_FROM + '&ps=100');
   var refreshMs = Number(qs.get('refresh_ms')||60000);
-  var divide    = Number(qs.get('divide')||1); // show raw by default
+  var divide    = Number(qs.get('divide')||1); // default raw
+  var pageLimit = Number(qs.get('page_limit')||10); // max pages to crawl in HTML mode
+  var mode      = (qs.get('mode')||'auto').toLowerCase(); // 'api' | 'html' | 'auto'
+  var apiKey    = (qs.get('apikey')||'').trim(); // if set, we prefer API mode
+  var offset    = Number(qs.get('offset')||100); // API items per page
 
   elFrom.textContent = ADDR_FROM;
   elTo.textContent = ADDR_TO;
 
-  function stripProtocol(u){
-    if(u.indexOf('https://')===0) return u.slice(8);
-    if(u.indexOf('http://')===0) return u.slice(7);
-    return u;
-  }
+  function fmtBNB(n){ return n.toLocaleString(undefined,{ maximumFractionDigits:8 }); }
+  function stripProtocol(u){ return u.replace(/^https?:\/\//,''); }
 
   function fetchViaProxy(url){
-    // Try your own Vercel Edge proxy first
+    // Try your Vercel Edge proxy first, then robust fallback
     return fetch('/api/proxy?url=' + encodeURIComponent(url))
       .then(function(r){ if(!r.ok) throw new Error('proxy ' + r.status); return r.text(); })
       .catch(function(){
-        // Fallback to r.jina.ai (must include the FULL URL incl. protocol!)
         var full = 'https://r.jina.ai/http/' + encodeURIComponent(url);
         return fetch(full, { headers:{ 'accept':'text/plain' } })
           .then(function(r){ if(!r.ok) throw new Error('fallback ' + r.status); return r.text(); });
       });
-  })
-      .catch(function(){
-        var noProto = stripProtocol(url);
-        return fetch('https://r.jina.ai/http/' + noProto, { headers:{ 'accept':'text/plain' } })
-          .then(function(r){ if(!r.ok) throw new Error('fallback ' + r.status); return r.text(); });
-      });
   }
 
-  // Parse the BscScan HTML and sum BNB where row From==ADDR_FROM and To==ADDR_TO
-  function sumBNB_AtoB(htmlText){
-    var parser = new DOMParser();
-    var doc = parser.parseFromString(htmlText, 'text/html');
+  // ---------- API MODE (recommended) ----------
+  // API doc: https://docs.bscscan.com/api-endpoints/accounts#get-internal-transactions-by-address
+  async function sumViaAPI(addressFrom, addressTo){
+    if(!apiKey) throw new Error('No API key supplied. Add ?apikey=YOUR_KEY or use mode=html');
+    var page = 1; var totalBNB = 0; var hits = 0; var requests = 0;
+    while(true){
+      var url = `https://api.bscscan.com/api?module=account&action=txlistinternal&address=${addressFrom}&startblock=0&endblock=99999999&page=${page}&offset=${offset}&sort=asc&apikey=${apiKey}`;
+      requests++;
+      var res = await fetchViaProxy(url); // use proxy to avoid CORS
+      var data; try { data = JSON.parse(res); } catch(e){ throw new Error('API JSON parse failed'); }
+      if(data.status !== '1' || !Array.isArray(data.result) || data.result.length === 0) break;
+      for(var i=0;i<data.result.length;i++){
+        var itx = data.result[i];
+        // Filter direction strictly From ➜ To (addresses are lowercase in API)
+        if((itx.from||'').toLowerCase() === addressFrom.toLowerCase() && (itx.to||'').toLowerCase() === addressTo.toLowerCase()){
+          var wei = BigInt(itx.value||'0');
+          if(wei > 0n){
+            var bnb = Number(wei) / 1e18; // may lose precision at very large, OK for donation sums
+            totalBNB += bnb; hits++;
+          }
+        }
+      }
+      if(data.result.length < offset) break; // last page
+      page++;
+      if(page>1000) break; // hard safety limit
+    }
+    return { total: totalBNB, hits: hits, pages: (requests) };
+  }
+
+  // ---------- HTML MODE (no API key) ----------
+  function parseRows_AtoB(doc, from, to){
     var rows = Array.from(doc.querySelectorAll('table tbody tr'));
-    var fromLC = ADDR_FROM.toLowerCase();
-    var toLC   = ADDR_TO.toLowerCase();
-    var total = 0;
-    var hits = 0;
+    var total = 0; var hits = 0;
 
     function getAddrFromHref(a){
-      try{
-        var href = a.getAttribute('href') || '';
-        // patterns like /address/0xabc... or full https
-        var m = href.match(/address\/(0x[a-fA-F0-9]{40})/);
-        return m ? m[1].toLowerCase() : '';
-      }catch(_){ return ''; }
+      var href = a.getAttribute('href') || '';
+      var m = href.match(/address\/(0x[a-fA-F0-9]{40})/);
+      return m ? m[1].toLowerCase() : '';
     }
-
     function parseBNBFromRow(tr){
-      var txt = tr.textContent || '';
-      // Prefer the Value column: try to find the last number followed by BNB
+      // Try value cell first if present
+      var valCell = tr.querySelector('td:nth-last-child(2), td:has(span:contains("BNB"))');
+      var txt = (valCell ? valCell.textContent : tr.textContent) || '';
       var m = txt.match(/([0-9]+(?:\.[0-9]+)?)\s*BNB/gi);
       if(!m) return 0;
       var last = m[m.length-1];
@@ -105,44 +117,82 @@
     }
 
     rows.forEach(function(tr){
-      // Find all address anchors in the row
       var anchors = Array.from(tr.querySelectorAll('a[href*="/address/"]'));
-      if(anchors.length === 0) return;
-      // Map to addresses (lowercase)
+      if(anchors.length < 2) return;
       var addrs = anchors.map(getAddrFromHref).filter(Boolean);
-      if(addrs.length < 2) return;
-      // Heuristic: first occurrence is From, second occurrence is To on BscScan rows
-      var fromIdx = addrs.indexOf(fromLC);
-      var toIdx   = addrs.indexOf(toLC);
-      if(fromIdx === -1 || toIdx === -1) return;
-      if(toIdx <= fromIdx) return; // ensure direction From ➜ To
-
+      var fromIdx = addrs.indexOf(from.toLowerCase());
+      var toIdx   = addrs.indexOf(to.toLowerCase());
+      if(fromIdx === -1 || toIdx === -1 || toIdx <= fromIdx) return;
       var val = parseBNBFromRow(tr);
       if(val > 0){ total += val; hits++; }
     });
-
     return { total: total, hits: hits };
   }
 
-  function tick(){
-    elMeta.textContent = 'Fetching…';
-    var t0 = performance.now();
-    fetchViaProxy(targetURL).then(function(text){
-      var out = sumBNB_AtoB(text);
-      var shown = out.total / (divide || 1);
-      var t1 = performance.now();
-      elAmt.textContent = shown.toLocaleString(undefined,{ maximumFractionDigits:8 }) + ' BNB';
-      elAmt.classList.add('blink'); setTimeout(function(){ elAmt.classList.remove('blink'); }, 1100);
-      elMeta.innerHTML = 'Source: <a href="' + targetURL + '" target="_blank" rel="noreferrer">BscScan</a> · Matched rows: ' + out.hits + ' · Raw total: ' + out.total.toLocaleString(undefined,{ maximumFractionDigits:8 }) + ' BNB · ÷ ' + (divide||1) + ' · ' + (t1 - t0 | 0) + ' ms';
-    }).catch(function(err){
-      console.error(err);
-      elMeta.innerHTML = '<span class="err">Error:</span> ' + err.message + '. If fallback 400, add <code>?url=…</code> or try later.';
-    });
+  async function sumViaHTML(baseUrl, from, to){
+    var page = 1; var pages = 0; var total = 0; var hits = 0;
+    while(page <= pageLimit){
+      var url = baseUrl + (baseUrl.includes('?') ? '&' : '?') + 'page=' + page;
+      var html = await fetchViaProxy(url);
+      var doc = new DOMParser().parseFromString(html, 'text/html');
+      var res = parseRows_AtoB(doc, from, to);
+      pages++;
+      total += res.total; hits += res.hits;
+      // stop if no table rows found or no hits and table looks empty
+      var anyRows = doc.querySelector('table tbody tr');
+      if(!anyRows) break;
+      // If a page had 0 BNB and there are pagination elements? keep going until pageLimit
+      page++;
+    }
+    return { total: total, hits: hits, pages: pages };
   }
 
-  tick();
-  if (refreshMs > 0) setInterval(tick, refreshMs);
+  async function compute(){
+    elMeta.textContent = 'Fetching…'; elExtra.textContent='';
+    var t0 = performance.now();
+    try{
+      var useAPI = (mode==='api') || (mode==='auto' && apiKey);
+      var out = useAPI ? await sumViaAPI(ADDR_FROM, ADDR_TO)
+                       : await sumViaHTML(BASE_URL, ADDR_FROM, ADDR_TO);
+      var shown = out.total / (divide || 1);
+      var t1 = performance.now();
+      elAmt.textContent = fmtBNB(shown) + ' BNB';
+      elAmt.classList.add('blink'); setTimeout(function(){ elAmt.classList.remove('blink'); }, 1100);
+      elMeta.innerHTML = (useAPI? 'Mode: API' : 'Mode: HTML') +
+        ' · Pages: ' + (out.pages||1) +
+        ' · Matches: ' + (out.hits||0) +
+        ' · Raw: ' + fmtBNB(out.total||0) + ' BNB' +
+        (divide && divide!==1 ? ' · ÷ ' + divide : '') +
+        ' · ' + ((t1-t0)|0) + ' ms';
+      elExtra.textContent = 'Source: ' + (useAPI ? 'BscScan API (internal tx by address)' : BASE_URL);
+    }catch(err){
+      console.error(err);
+      elAmt.textContent = '0 BNB';
+      elMeta.innerHTML = '<span class="err">Error:</span> ' + err.message + '. Try adding ?mode=api&apikey=YOUR_KEY or ensure /api/proxy exists.';
+    }
+  }
+
+  compute();
+  if (refreshMs > 0) setInterval(compute, refreshMs);
 })();
 </script>
 </body>
 </html>
+
+<!-- Optional: /api/proxy.js (Edge) for CORS-free fetching -->
+<!--
+export const config = { runtime: 'edge' };
+export default async (req) => {
+  try {
+    const { searchParams } = new URL(req.url);
+    let target = searchParams.get('url');
+    if (!target) return new Response('Missing url', { status: 400 });
+    if (!/^https?:\/\//i.test(target)) target = 'https://' + target;
+    const r = await fetch(target, { headers:{ 'user-agent':'Mozilla/5.0', 'accept':'text/html,application/json' } });
+    const text = await r.text();
+    return new Response(text, { headers:{ 'content-type':'text/plain; charset=utf-8', 'access-control-allow-origin':'*', 'cache-control':'s-maxage=60, stale-while-revalidate=300' } });
+  } catch (e) {
+    return new Response('Proxy error: ' + e.message, { status: 500 });
+  }
+};
+-->
